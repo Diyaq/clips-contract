@@ -1073,16 +1073,6 @@ impl ClipsNftContract {
             env.storage().persistent().remove(&DataKey::Approved(token_id));
         }
 
-        // 1 persistent write — update owner in-place, clip_id unchanged
-        data.owner = to.clone();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Token(token_id), &data);
-        env.events().publish(
-            (symbol_short!("transfer"),),
-            TransferEvent { token_id, from, to },
-        );
-
         Ok(())
     }
 
@@ -1118,6 +1108,8 @@ impl ClipsNftContract {
     /// Returns true if the token exists.
     pub fn exists(env: Env, token_id: TokenId) -> bool {
         env.storage().persistent().has(&DataKey::Token(token_id))
+    }
+
     /// Returns `true` if `operator` is approved to manage all of `owner`'s tokens.
     pub fn is_approved_for_all(env: Env, owner: Address, operator: Address) -> bool {
         env.storage()
@@ -1168,26 +1160,6 @@ impl ClipsNftContract {
             .get(&DataKey::Token(token_id))
             .ok_or(Error::InvalidTokenId)?;
 
-        let mut total_royalty_amount: i128 = 0;
-        for idx in 0..royalty.recipients.len() {
-            let split = royalty
-                .recipients
-                .get(idx)
-                .ok_or(Error::InvalidRoyaltySplit)?;
-
-            // Safe multiplication: check for overflow before multiplying
-            let basis_points_i128 = split.basis_points as i128;
-            if sale_price > i128::MAX / basis_points_i128 {
-                return Err(Error::RoyaltyOverflow);
-            }
-
-            let royalty_for_split = sale_price.saturating_mul(basis_points_i128) / 10_000;
-            total_royalty_amount = total_royalty_amount.saturating_add(royalty_for_split);
-        }
-        let first = royalty
-            .recipients
-            .get(0)
-            .ok_or(Error::InvalidRoyaltySplit)?;
         if from != data.owner {
             return Err(Error::Unauthorized);
         }
@@ -1199,39 +1171,6 @@ impl ClipsNftContract {
         // Clear per-token approval on transfer.
         env.storage().persistent().remove(&DataKey::Approved(token_id));
 
-        if sale_price <= 0 {
-            return Err(Error::InvalidSalePrice);
-        }
-        let royalty: Royalty = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Royalty(token_id))
-            .ok_or(Error::InvalidTokenId)?;
-        let asset_address = royalty
-            .asset_address
-            .clone()
-            .ok_or(Error::InvalidRecipient)?;
-        let token_client = soroban_sdk::token::TokenClient::new(&env, &asset_address);
-        for idx in 0..royalty.recipients.len() {
-            let split = royalty
-                .recipients
-                .get(idx)
-                .ok_or(Error::InvalidRoyaltySplit)?;
-            let amount = sale_price.saturating_mul(split.basis_points as i128) / 10_000;
-            if amount == 0 {
-                continue;
-            }
-            token_client.transfer(&payer, &split.recipient, &amount);
-            env.events().publish(
-                (symbol_short!("royalty"),),
-                RoyaltyPaidEvent {
-                    token_id,
-                    from: payer.clone(),
-                    to: split.recipient,
-                    amount,
-                },
-            );
-        }
         data.owner = to.clone();
         env.storage().persistent().set(&DataKey::Token(token_id), &data);
 
@@ -1295,29 +1234,6 @@ impl ClipsNftContract {
             .get(&DataKey::Token(token_id))
             .ok_or(Error::InvalidTokenId)?;
 
-        let new_royalty = Self::normalize_royalty(&env, new_royalty)?;
-
-        // Emit event if primary recipient changed
-        if !old_royalty.recipients.is_empty() && !new_royalty.recipients.is_empty() {
-            let old_recipient = old_royalty
-                .recipients
-                .get(0)
-                .ok_or(Error::InvalidRoyaltySplit)?;
-            let new_recipient = new_royalty
-                .recipients
-                .get(0)
-                .ok_or(Error::InvalidRoyaltySplit)?;
-
-            if old_recipient.recipient != new_recipient.recipient {
-                env.events().publish(
-                    (symbol_short!("royalty"),),
-                    RoyaltyRecipientUpdatedEvent {
-                        token_id,
-                        old_recipient: old_recipient.recipient,
-                        new_recipient: new_recipient.recipient,
-                    },
-                );
-            }
         if from != data.owner {
             return Err(Error::Unauthorized);
         }
@@ -1340,17 +1256,6 @@ impl ClipsNftContract {
         data.owner = to.clone();
         env.storage().persistent().set(&DataKey::Token(token_id), &data);
 
-        // 4 persistent removes
-        env.storage().persistent().remove(&DataKey::Token(token_id));
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Metadata(token_id));
-        env.storage()
-            .persistent()
-            .remove(&DataKey::Royalty(token_id));
-        env.storage()
-            .persistent()
-            .remove(&DataKey::ClipIdMinted(data.clip_id));
         // Update balances
         let from_balance: u32 = env.storage().persistent().get(&DataKey::Balance(from.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Balance(from.clone()), &from_balance.saturating_sub(1));
@@ -1504,8 +1409,6 @@ impl ClipsNftContract {
             return Err(Error::Unauthorized);
         }
 
-        // Hash the metadata URI bytes
-        let uri_hash: BytesN<32> = env.crypto().sha256(&metadata_uri.to_xdr(env)).into();
         // Check if metadata has already been updated
         let update_count: u32 = env
             .storage()
@@ -1530,9 +1433,6 @@ impl ClipsNftContract {
             .persistent()
             .set(&DataKey::MetadataUpdateCount(token_id), &(update_count + 1));
 
-        // Panics (traps) on invalid signature — map to our error type
-        env.crypto()
-            .ed25519_verify(&signer, &Bytes::from(message), signature);
         env.events().publish(
             (symbol_short!("meta_upd"),),
             MetadataUpdatedEvent {
@@ -1681,15 +1581,10 @@ impl ClipsNftContract {
 
         Ok(())
     }
+}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use soroban_sdk::{
-        testutils::{Address as _, BytesN as _, Events as _},
-        xdr::ToXdr,
-        Address, Bytes, BytesN, Env, String, Vec,
-    };
+#[contractimpl]
+impl ClipsNftContract {
     // -------------------------------------------------------------------------
     // View functions
     // -------------------------------------------------------------------------
@@ -1725,20 +1620,6 @@ mod tests {
         }
     }
 
-    /// Build the canonical mint payload and sign it with `signer_secret`.
-    /// Mirrors the on-chain `verify_clip_signature` logic exactly.
-    fn sign_mint(
-        env: &Env,
-        signer_secret: &ed25519_dalek::SigningKey,
-        owner: &Address,
-        clip_id: u32,
-        metadata_uri: &String,
-    ) -> BytesN<64> {
-        let owner_hash: BytesN<32> = env.crypto().sha256(&owner.clone().to_xdr(env)).into();
-        let uri_hash: BytesN<32> = env
-            .crypto()
-            .sha256(&Bytes::from(metadata_uri.to_xdr(env)))
-            .into();
     /// Returns the collection name (default: `"ClipCash Clips"`).
     pub fn name(env: Env) -> String {
         env.storage()
@@ -1772,25 +1653,6 @@ mod tests {
     /// * [`Error::InvalidTokenId`] — token does not exist.
     pub fn owner_of(env: Env, token_id: TokenId) -> Result<Address, Error> {
         Ok(Self::load_token(&env, token_id)?.owner)
-    }
-
-    fn do_mint(
-        client: &ClipsNftContractClient,
-        env: &Env,
-        to: &Address,
-        clip_id: u32,
-        keypair: &ed25519_dalek::SigningKey,
-    ) -> TokenId {
-        let uri = String::from_str(env, "ipfs://QmExample");
-        let sig = sign_mint(env, keypair, to, clip_id, &uri);
-        client.mint(
-            to,
-            &clip_id,
-            &uri,
-            &default_royalty(env, to.clone()),
-            &false,
-            &sig,
-        )
     }
 
     /// Returns the metadata URI for a given token ID.
@@ -1898,11 +1760,6 @@ mod tests {
             .get::<DataKey, u32>(&DataKey::NextTokenId)
             .unwrap_or(1)
             .saturating_sub(1)
-    }
-
-    /// Returns `true` if the token exists.
-    pub fn exists(env: Env, token_id: TokenId) -> bool {
-        env.storage().persistent().has(&DataKey::Token(token_id))
     }
 
     /// Returns `true` if the token is soulbound (non-transferable).
@@ -3587,24 +3444,14 @@ mod tests {
     // royalty overflow / safe math tests
     #[test]
     fn test_royalty_calculation_safe_math() {
-        let (env, admin, user1, _) = setup();
+        let (env, admin, user1, user2) = setup();
         let contract_id = env.register(ClipsNftContract, ());
         let client = ClipsNftContractClient::new(&env, &contract_id);
         client.init(&admin);
         let kp = register_signer(&env, &client, &admin);
 
         let uri = String::from_str(&env, "ipfs://QmExample");
-        // Signature is over user2 but we pass user1 as `to`
-        let sig_for_user2 = sign_mint(&env, &kp, &user2, 1, &uri);
 
-        client.mint(
-            &user1,
-            &1u32,
-            &uri,
-            &default_royalty(&env, user1.clone()),
-            &false,
-            &sig_for_user2,
-        );
         let token_id = do_mint(&client, &env, &user1, 104, &kp);
         let info = client.royalty_info(&token_id, &1_000_000_000_000_000i128);
         assert_eq!(info.royalty_amount, 60_000_000_000_000i128);
@@ -3618,18 +3465,6 @@ mod tests {
         client.init(&admin);
         let kp = register_signer(&env, &client, &admin);
 
-        let uri = String::from_str(&env, "ipfs://QmExample");
-        // Signature is over clip_id=99 but we pass clip_id=1
-        let sig_for_99 = sign_mint(&env, &kp, &user1, 99, &uri);
-
-        client.mint(
-            &user1,
-            &1u32,
-            &uri,
-            &default_royalty(&env, user1.clone()),
-            &false,
-            &sig_for_99,
-        );
         let token_id = do_mint(&client, &env, &user1, 105, &kp);
         let result = client.try_royalty_info(&token_id, &i128::MAX);
         assert_eq!(result, Err(Ok(Error::RoyaltyOverflow)));
@@ -3831,12 +3666,18 @@ mod tests {
         let t2 = do_mint(&client, &env, &user1, 401, &kp);
         let _t3 = do_mint(&client, &env, &user2, 402, &kp);
 
+        // Pause the contract and advance time past the 24-hour timelock
+        client.pause(&admin);
+        env.ledger().set_timestamp(env.ledger().timestamp() + 86401);
+
         let uri = String::from_str(&env, "ipfs://QmPaused");
         let sig = sign_mint(&env, &kp, &user1, 1, &uri);
         let result = client.try_mint(
             &user1,
             &1u32,
             &uri,
+            &None,
+            &None,
             &default_royalty(&env, user1.clone()),
             &false,
             &sig,
@@ -4308,7 +4149,7 @@ mod tests {
 
     #[test]
     fn test_refresh_metadata_admin_success() {
-        let (env, admin, user1, _) = setup();
+        let (env, admin, user1, user2) = setup();
         let contract_id = env.register(ClipsNftContract, ());
         let client = ClipsNftContractClient::new(&env, &contract_id);
         client.init(&admin);
@@ -4323,6 +4164,8 @@ mod tests {
             &user2,
             &203u32,
             &uri,
+            &None,
+            &None,
             &default_royalty(&env, user2.clone()),
             &false,
             &sig,
@@ -4342,8 +4185,6 @@ mod tests {
         let client = ClipsNftContractClient::new(&env, &contract_id);
         client.init(&admin);
         let kp = register_signer(&env, &client, &admin);
-        let token_id = do_mint(&client, &env, &user1, 2001, &kp);
-
         // Mint token
         let token_id = do_mint(&client, &env, &user1, 204, &kp);
         assert!(client.exists(&token_id));
@@ -4352,21 +4193,19 @@ mod tests {
         // Burn token
         client.burn(&user1, &token_id);
         assert!(!client.exists(&token_id));
-        // Note: total_supply is derived from NextTokenId - 1, so it remains 1
-        // even after burning (NextTokenId is still 2)
-        assert_eq!(client.total_supply(), 1);
+        // total_supply is decremented on burn
+        assert_eq!(client.total_supply(), 0);
 
         // Can re-mint same clip_id after burn
         let token_id2 = do_mint(&client, &env, &user1, 204, &kp);
         assert!(client.exists(&token_id2));
-        // Now NextTokenId is 3, so total_supply is 2
-        assert_eq!(client.total_supply(), 2);
+        assert_eq!(client.total_supply(), 1);
         let new_uri = String::from_str(&env, "ipfs://QmRefreshedEvt");
-        client.refresh_metadata(&admin, &token_id, &Some(new_uri.clone()), &None, &None);
+        client.refresh_metadata(&admin, &token_id2, &Some(new_uri.clone()), &None, &None);
 
         let events = env.events().all();
         assert!(events.events().len() >= 1);
-        assert_eq!(client.token_uri(&token_id), new_uri);
+        assert_eq!(client.token_uri(&token_id2), new_uri);
     }
 
     #[test]

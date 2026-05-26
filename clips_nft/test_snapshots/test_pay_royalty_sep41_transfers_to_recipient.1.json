@@ -38,7 +38,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "bytes": "db7524855cdb9487f771ffbda7e0c97380d29edfe67f0123f685c959801dd0af"
+                  "bytes": "8df9aa11bb4e7426dbcb5d69eadc776f82d65dddc64df4aa042972edfb0f5f97"
                 }
               ]
             }
@@ -153,7 +153,7 @@
                   "bool": false
                 },
                 {
-                  "bytes": "e68c3a6ea60a24158396eab3e4826b14128e74aefa9296c2f5a5e7c184dad2f3283cb21b47058e6d2e50fb5cae9a85203c94c6a2758312f947a1497e68df3309"
+                  "bytes": "7f612f99424f572193581eaa194c9f70ec3edd4780caee62f935e14b93611bd1b16e16075f25f8d5f53953ff6b3b84556e27cc9af1342d65a96549733e62860b"
                 }
               ]
             }
@@ -730,12 +730,24 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "ReentrancyLock"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Signer"
                           }
                         ]
                       },
                       "val": {
-                        "bytes": "db7524855cdb9487f771ffbda7e0c97380d29edfe67f0123f685c959801dd0af"
+                        "bytes": "8df9aa11bb4e7426dbcb5d69eadc776f82d65dddc64df4aa042972edfb0f5f97"
                       }
                     },
                     {
