@@ -103,6 +103,8 @@ pub enum Error {
     MintCooldownActive = 23,
     /// Reentrant call detected while a guarded entrypoint is executing.
     Reentrancy = 24,
+    /// Metadata is permanently locked and cannot be changed.
+    MetadataLocked = 25,
 }
 
 // =============================================================================
@@ -165,6 +167,8 @@ pub struct TokenData {
     pub attributes: Vec<Attribute>,
     /// Royalty configuration for secondary sales.
     pub royalty: Royalty,
+    /// When `true` the metadata is permanently frozen and can never be changed again.
+    pub is_locked: bool,
 }
 
 /// A single royalty split recipient.
@@ -490,6 +494,14 @@ pub struct RoyaltyClaimedEvent {
 pub struct AdminChangedEvent {
     pub old_admin: Address,
     pub new_admin: Address,
+}
+
+/// Emitted when a token's metadata is permanently locked by its owner.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MetadataLockedEvent {
+    pub token_id: TokenId,
+    pub owner: Address,
 }
 
 
@@ -944,6 +956,7 @@ impl ClipsNftContract {
                 external_url: None,
                 attributes: Vec::new(&env),
                 royalty,
+                is_locked: false,
             },
         );
         Self::bump_persistent_ttl(&env, &DataKey::Token(token_id));
@@ -1366,6 +1379,10 @@ impl ClipsNftContract {
             return Err(Error::Unauthorized);
         }
 
+        if data.is_locked {
+            return Err(Error::MetadataLocked);
+        }
+
         // Check if metadata has already been updated
         let update_count: u32 = env
             .storage()
@@ -1411,6 +1428,43 @@ impl ClipsNftContract {
         uri: String,
     ) -> Result<(), Error> {
         Self::update_metadata(env, owner, token_id, uri)
+    }
+
+    /// Permanently lock a token's metadata so it can never be changed again.
+    ///
+    /// Only the current token owner may call this. The lock is irreversible.
+    ///
+    /// Emits: `"meta_lock"` [`MetadataLockedEvent`].
+    ///
+    /// # Errors
+    /// * [`Error::Unauthorized`]   — caller is not the token owner.
+    /// * [`Error::InvalidTokenId`] — token does not exist.
+    /// * [`Error::MetadataLocked`] — token metadata is already locked.
+    pub fn lock_metadata(env: Env, owner: Address, token_id: TokenId) -> Result<(), Error> {
+        owner.require_auth();
+        let mut data = Self::load_token(&env, token_id)?;
+        if data.owner != owner {
+            return Err(Error::Unauthorized);
+        }
+        if data.is_locked {
+            return Err(Error::MetadataLocked);
+        }
+        data.is_locked = true;
+        env.storage().persistent().set(&DataKey::Token(token_id), &data);
+        env.events().publish(
+            (symbol_short!("meta_lock"),),
+            MetadataLockedEvent { token_id, owner },
+        );
+        Ok(())
+    }
+
+    /// Returns `true` if the token's metadata has been permanently locked.
+    ///
+    /// # Errors
+    /// * [`Error::InvalidTokenId`] — token does not exist.
+    pub fn is_metadata_locked(env: Env, token_id: TokenId) -> Result<bool, Error> {
+        let data = Self::load_token(&env, token_id)?;
+        Ok(data.is_locked)
     }
 
     /// Push updated metadata from the backend (e.g. after virality score changes).
@@ -1490,6 +1544,14 @@ impl ClipsNftContract {
         {
             if now < last_refresh.saturating_add(COOLDOWN) {
                 return Err(Error::MetadataRefreshTooSoon);
+            }
+        }
+
+        // Reject if metadata is permanently locked.
+        {
+            let data = Self::load_token(&env, token_id)?;
+            if data.is_locked {
+                return Err(Error::MetadataLocked);
             }
         }
 
@@ -2466,6 +2528,7 @@ impl ClipsNftContract {
                     external_url: None,
                     attributes: Vec::new(&env),
                     royalty: royalty.clone(),
+                    is_locked: false,
                 },
             );
             Self::bump_persistent_ttl(&env, &DataKey::Token(token_id));
