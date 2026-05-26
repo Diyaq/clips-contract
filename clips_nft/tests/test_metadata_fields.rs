@@ -40,8 +40,8 @@ fn test_mint_with_image_and_animation_url() {
     
     // Verify JSON output includes both fields
     let json = ctx.client.get_metadata_json(&token_id);
-    assert!(json.contains(&String::from_str(ctx.env, "\"image\":")));
-    assert!(json.contains(&String::from_str(ctx.env, "\"animation_url\":")));
+    assert!(string_contains(&json, "\"image\":"));
+    assert!(string_contains(&json, "\"animation_url\":"));
 }
 
 #[test]
@@ -70,8 +70,8 @@ fn test_mint_with_only_animation_url() {
     
     // Verify JSON output includes animation_url but not image
     let json = ctx.client.get_metadata_json(&token_id);
-    assert!(!json.contains(&String::from_str(ctx.env, "\"image\":")));
-    assert!(json.contains(&String::from_str(ctx.env, "\"animation_url\":")));
+    assert!(!string_contains(&json, "\"image\":"));
+    assert!(string_contains(&json, "\"animation_url\":"));
 }
 
 #[test]
@@ -99,8 +99,8 @@ fn test_mint_without_media_fields() {
     
     // Verify JSON output excludes both fields
     let json = ctx.client.get_metadata_json(&token_id);
-    assert!(!json.contains(&String::from_str(ctx.env, "\"image\":")));
-    assert!(!json.contains(&String::from_str(ctx.env, "\"animation_url\":")));
+    assert!(!string_contains(&json, "\"image\":"));
+    assert!(!string_contains(&json, "\"animation_url\":"));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn test_refresh_metadata_updates_image() {
     ctx.client.refresh_metadata(&ctx.admin, &token_id, &None, &new_image, &None);
     
     let json = ctx.client.get_metadata_json(&token_id);
-    assert!(json.contains(&String::from_str(ctx.env, "new-image.png")));
+    assert!(string_contains(&json, "new-image.png"));
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn test_refresh_metadata_updates_animation_url() {
     ctx.client.refresh_metadata(&ctx.admin, &token_id, &None, &None, &new_animation);
     
     let json = ctx.client.get_metadata_json(&token_id);
-    assert!(json.contains(&String::from_str(ctx.env, "QmNewAnimation.webm")));
+    assert!(string_contains(&json, "QmNewAnimation.webm"));
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn test_refresh_metadata_clears_image_with_empty_string() {
     ctx.client.refresh_metadata(&ctx.admin, &token_id, &None, &empty, &None);
     
     let json = ctx.client.get_metadata_json(&token_id);
-    assert!(!json.contains(&String::from_str(ctx.env, "\"image\":")));
+    assert!(!string_contains(&json, "\"image\":"));
 }
 
 #[test]

@@ -14,7 +14,7 @@ use soroban_sdk::{
 
 /// Fully initialized test context returned by [`setup`].
 pub struct TestContext<'a> {
-    pub env: Env,
+    pub env: &'a Env,
     pub client: ClipsNftContractClient<'a>,
     pub admin: Address,
     pub keypair: ed25519_dalek::SigningKey,
@@ -22,6 +22,11 @@ pub struct TestContext<'a> {
 
 /// Register the contract, init it, and register a fresh backend signer.
 /// Calls `env.mock_all_auths()` so every auth check passes automatically.
+/// Alias used by metadata integration tests.
+pub fn setup_test() -> TestContext<'static> {
+    setup()
+}
+
 pub fn setup() -> TestContext<'static> {
     let env = Env::default();
     env.mock_all_auths();
@@ -149,7 +154,7 @@ pub fn simulate_sale(
 // Internal utility
 // ---------------------------------------------------------------------------
 
-fn default_royalty(env: &Env, recipient: Address) -> Royalty {
+pub fn default_royalty(env: &Env, recipient: Address) -> Royalty {
     let mut recipients = Vec::new(env);
     recipients.push_back(RoyaltyRecipient { recipient, basis_points: 500 });
     Royalty { recipients, asset_address: None }
@@ -157,6 +162,11 @@ fn default_royalty(env: &Env, recipient: Address) -> Royalty {
 
 /// Deploy a fresh SEP-0041 token, mint `amount` to `holder`, and return the
 /// token address. Useful for `simulate_sale` tests.
+/// Substring check for Soroban [`String`] values in native tests.
+pub fn string_contains(haystack: &String, needle: &str) -> bool {
+    format!("{haystack}").contains(needle)
+}
+
 pub fn deploy_token(env: &Env, holder: &Address, amount: i128) -> Address {
     let token_admin = Address::generate(env);
     let addr = env.register_stellar_asset_contract_v2(token_admin.clone()).address();

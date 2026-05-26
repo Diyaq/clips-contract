@@ -38,7 +38,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "bytes": "9da90ec0c30c69015e2f90c5224407dfdc975bbd0ee8d542c31bf0bb64b60887"
+                  "bytes": "b8f38d34d73480459c97d2b65a1b6cc889df2a28015d7b4c138d2da54713314d"
                 }
               ]
             }
@@ -130,6 +130,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "MintCooldownSeconds"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Name"
                           }
                         ]
@@ -183,7 +195,7 @@
                         ]
                       },
                       "val": {
-                        "bytes": "9da90ec0c30c69015e2f90c5224407dfdc975bbd0ee8d542c31bf0bb64b60887"
+                        "bytes": "b8f38d34d73480459c97d2b65a1b6cc889df2a28015d7b4c138d2da54713314d"
                       }
                     },
                     {

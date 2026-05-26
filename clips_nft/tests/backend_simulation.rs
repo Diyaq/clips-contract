@@ -4,7 +4,7 @@ mod test_helpers;
 
 use clips_nft::{ClipsNftContract, ClipsNftContractClient, Royalty, RoyaltyRecipient};
 use soroban_sdk::{
-    testutils::{Address as _, BytesN as _},
+    testutils::{Address as _, BytesN as _, Ledger as _},
     Address, Bytes, BytesN, Env, String, Vec, xdr::ToXdr,
     token,
 };
@@ -191,9 +191,10 @@ fn test_error_cases() {
     let result = client.try_set_signer(&malicious, &backend.public_key(&env));
     assert!(result.is_err());
 
-    // Case 4: Transfer while paused
+    // Case 4: Transfer while paused (after 24h timelock elapses)
     let token_id = 1;
     client.pause(&admin);
+    env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
     let result = client.try_transfer(&user, &malicious, &token_id);
     assert!(result.is_err());
 
@@ -201,6 +202,15 @@ fn test_error_cases() {
     client.unpause(&admin);
     let other_user = Address::generate(&env);
     let sig_for_other = backend.sign_mint(&env, &other_user, 304, &metadata_uri);
-    let result = client.try_mint(&user, &304u32, &metadata_uri, &royalty, &false, &sig_for_other);
+    let result = client.try_mint(
+        &user,
+        &304u32,
+        &metadata_uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &sig_for_other,
+    );
     assert!(result.is_err());
 }

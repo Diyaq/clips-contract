@@ -4,7 +4,7 @@ mod test_helpers;
 
 use clips_nft::{ClipsNftContract, ClipsNftContractClient, Royalty, RoyaltyRecipient};
 use soroban_sdk::{
-    testutils::{Address as _, BytesN as _},
+    testutils::{Address as _, BytesN as _, Ledger as _},
     Address, Bytes, BytesN, Env, String, Vec, xdr::ToXdr,
 };
 
@@ -128,11 +128,14 @@ fn test_integration_wallet_simulation_mint_and_royalty() {
     // Verify transfer
     assert_eq!(client.owner_of(&token_id), new_owner);
     
-    // 8. Test "Is Paused" flow (Wallet should respect pause)
+    // 8. Test "Is Paused" flow (24h timelock before pause is active)
     client.pause(&admin);
+    assert!(!client.is_paused());
+
+    env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
     assert!(client.is_paused());
-    
-    // Attempting to transfer while paused should fail (mock_all_auths still applies, but contract logic blocks it)
+
+    // Attempting to transfer while paused should fail
     let result = client.try_transfer(&new_owner, &user_wallet, &token_id);
     assert!(result.is_err());
     
@@ -228,6 +231,8 @@ fn test_batch_mint_enforces_gas_safe_limit() {
 
     let mut clip_ids = Vec::new(&env);
     let mut metadata_uris = Vec::new(&env);
+    let mut images = Vec::new(&env);
+    let mut animation_urls = Vec::new(&env);
     let mut signatures = Vec::new(&env);
     for i in 0..26u32 {
         let clip_id = 10_000 + i;
@@ -235,6 +240,8 @@ fn test_batch_mint_enforces_gas_safe_limit() {
         let signature = sign_mint(&env, &signer_keypair, &owner, clip_id, &metadata_uri);
         clip_ids.push_back(clip_id);
         metadata_uris.push_back(metadata_uri);
+        images.push_back(None);
+        animation_urls.push_back(None);
         signatures.push_back(signature);
     }
 
@@ -249,7 +256,16 @@ fn test_batch_mint_enforces_gas_safe_limit() {
     };
 
     assert!(client
-        .try_batch_mint(&owner, &clip_ids, &metadata_uris, &royalty, &false, &signatures)
+        .try_batch_mint(
+            &owner,
+            &clip_ids,
+            &metadata_uris,
+            &images,
+            &animation_urls,
+            &royalty,
+            &false,
+            &signatures,
+        )
         .is_err());
 }
 
@@ -287,7 +303,16 @@ fn test_pause_timelock_mint_still_works_before_24h() {
     let mut recipients = Vec::new(&env);
     recipients.push_back(RoyaltyRecipient { recipient: user.clone(), basis_points: 500 });
     let royalty = Royalty { recipients, asset_address: None };
-    let result = client.try_mint(&user, &clip_id, &uri, &royalty, &false, &sig);
+    let result = client.try_mint(
+        &user,
+        &clip_id,
+        &uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &sig,
+    );
     assert!(result.is_ok(), "mint should succeed before 24h timelock elapses");
 }
 
@@ -308,24 +333,81 @@ fn test_pause_timelock_blocks_mint_after_24h() {
     let pubkey = BytesN::from_array(&env, &kp.verifying_key().to_bytes());
     client.set_signer(&admin, &pubkey);
 
+    client.pause(&admin);
+    env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
+
+    let clip_id = 8002u32;
+    let uri = String::from_str(&env, "ipfs://QmTimelock2");
+    let sig = sign_mint(&env, &kp, &user, clip_id, &uri);
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(RoyaltyRecipient { recipient: user.clone(), basis_points: 500 });
+    let royalty = Royalty { recipients, asset_address: None };
+    let result = client.try_mint(
+        &user,
+        &clip_id,
+        &uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &sig,
+    );
+    assert!(result.is_err(), "mint should fail after 24h timelock elapses");
+}
+
+#[test]
+fn test_pay_royalty_sep41_transfers_to_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    let contract_id = env.register(ClipsNftContract, ());
+    let client = ClipsNftContractClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let sk_bytes = soroban_sdk::BytesN::<32>::random(&env).to_array();
+    let kp = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+    let pubkey = BytesN::from_array(&env, &kp.verifying_key().to_bytes());
+    client.set_signer(&admin, &pubkey);
+
     let token_admin = Address::generate(&env);
-    let asset = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
-    soroban_sdk::token::StellarAssetClient::new(&env, &asset).mint(&buyer, &1_000_000i128);
+    let asset = env
+        .register_stellar_asset_contract_v2(token_admin.clone())
+        .address();
+    let token = soroban_sdk::token::StellarAssetClient::new(&env, &asset);
+    token.mint(&buyer, &1_000_000i128);
 
     let clip_id = 9002u32;
-    let uri = String::from_str(&env, "ipfs://QmClaim2");
+    let uri = String::from_str(&env, "ipfs://QmRoyaltyPay");
     let sig = sign_mint(&env, &kp, &creator, clip_id, &uri);
     let mut recipients = Vec::new(&env);
-    recipients.push_back(RoyaltyRecipient { recipient: creator.clone(), basis_points: 500 });
-    let royalty = Royalty { recipients, asset_address: Some(asset.clone()) };
-    let token_id = client.mint(&creator, &clip_id, &uri, &None, &None, &royalty, &false, &sig);
+    recipients.push_back(RoyaltyRecipient {
+        recipient: creator.clone(),
+        basis_points: 500,
+    });
+    let royalty = Royalty {
+        recipients,
+        asset_address: Some(asset.clone()),
+    };
+    let token_id = client.mint(
+        &creator,
+        &clip_id,
+        &uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &sig,
+    );
 
-    client.pay_royalty(&buyer, &token_id, &1_000_000i128);
-    client.claim_royalties(&creator, &token_id);
+    let sale_price = 1_000_000i128;
+    client.pay_royalty(&buyer, &token_id, &sale_price);
 
-    // Second claim should fail — balance is zero
-    let result = client.try_claim_royalties(&creator, &token_id);
-    assert_eq!(result, Err(Ok(clips_nft::Error::InsufficientBalance)));
+    let token_client = soroban_sdk::token::TokenClient::new(&env, &asset);
+    assert!(token_client.balance(&creator) > 0);
 }
 
 #[test]
@@ -359,7 +441,16 @@ fn test_claim_royalties_unauthorized_caller_fails() {
     let mut recipients = Vec::new(&env);
     recipients.push_back(RoyaltyRecipient { recipient: user.clone(), basis_points: 500 });
     let royalty = Royalty { recipients, asset_address: None };
-    let result = client.try_mint(&user, &clip_id, &uri, &royalty, &false, &sig);
+    let result = client.try_mint(
+        &user,
+        &clip_id,
+        &uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &sig,
+    );
     assert!(result.is_ok(), "mint should succeed after unpause");
 }
 
