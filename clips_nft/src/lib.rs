@@ -101,6 +101,8 @@ pub enum Error {
     InvalidAnimationUrl = 22,
     /// Mint attempted before wallet cooldown elapsed.
     MintCooldownActive = 23,
+    /// Reentrant call detected while a guarded entrypoint is executing.
+    Reentrancy = 24,
 }
 
 // =============================================================================
@@ -282,6 +284,8 @@ pub enum DataKey {
     LastMintTimestamp(Address),
     /// Required delay between mints from one wallet (instance).
     MintCooldownSeconds,
+    /// Reentrancy guard for external token calls (instance).
+    ReentrancyLock,
 }
 
 /// Emergency withdrawal request
@@ -731,7 +735,19 @@ impl ClipsNftContract {
     /// * `amount` - The amount to withdraw (must match the requested amount)
     pub fn withdraw_asset(env: Env, admin: Address, asset: Address, amount: i128) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
+        Self::acquire_reentrancy_lock(&env)?;
+        let result = Self::withdraw_asset_internal(&env, &admin, &asset, amount);
+        Self::release_reentrancy_lock(&env);
+        result
+    }
 
+    /// Internal asset withdrawal (caller must hold reentrancy lock).
+    fn withdraw_asset_internal(
+        env: &Env,
+        admin: &Address,
+        asset: &Address,
+        amount: i128,
+    ) -> Result<(), Error> {
         let request: WithdrawRequest = env.storage().instance()
             .get(&DataKey::WithdrawXlmRequest)
             .ok_or(Error::NoWithdrawalRequest)?;
@@ -748,8 +764,8 @@ impl ClipsNftContract {
         env.storage().instance().remove(&DataKey::WithdrawXlmRequest);
 
         // Execute the transfer
-        let client = soroban_sdk::token::TokenClient::new(&env, &asset);
-        client.transfer(&env.current_contract_address(), &admin, &amount);
+        let client = soroban_sdk::token::TokenClient::new(env, asset);
+        client.transfer(&env.current_contract_address(), admin, &amount);
 
         // Record the timestamp of this withdrawal for audit purposes
         env.storage()
@@ -758,7 +774,10 @@ impl ClipsNftContract {
 
         env.events().publish(
             (symbol_short!("with_exe"),),
-            WithdrawExecutedEvent { amount, recipient: admin },
+            WithdrawExecutedEvent {
+                amount,
+                recipient: admin.clone(),
+            },
         );
 
         Ok(())
@@ -1941,14 +1960,26 @@ impl ClipsNftContract {
         sale_price: i128,
     ) -> Result<(), Error> {
         payer.require_auth();
+        Self::acquire_reentrancy_lock(&env)?;
+        let result = Self::pay_royalty_internal(&env, &payer, token_id, sale_price);
+        Self::release_reentrancy_lock(&env);
+        result
+    }
 
+    /// Internal royalty payout logic (caller must hold reentrancy lock).
+    fn pay_royalty_internal(
+        env: &Env,
+        payer: &Address,
+        token_id: TokenId,
+        sale_price: i128,
+    ) -> Result<(), Error> {
         if sale_price <= 0 {
             return Err(Error::InvalidSalePrice);
         }
 
-        let royalty = Self::load_token(&env, token_id)?.royalty;
+        let royalty = Self::load_token(env, token_id)?.royalty;
         let asset_address = royalty.asset_address.clone().ok_or(Error::InvalidRecipient)?;
-        let token_client = soroban_sdk::token::TokenClient::new(&env, &asset_address);
+        let token_client = soroban_sdk::token::TokenClient::new(env, &asset_address);
 
         let mut cumulative_bps: u32 = 0;
         let mut cumulative_royalty: i128 = 0;
@@ -1965,7 +1996,7 @@ impl ClipsNftContract {
                 continue;
             }
 
-            token_client.transfer(&payer, &split.recipient, &amount);
+            token_client.transfer(payer, &split.recipient, &amount);
             env.events().publish(
                 (symbol_short!("royalty"),),
                 RoyaltyPaidEvent {
@@ -2013,15 +2044,26 @@ impl ClipsNftContract {
     /// * [`Error::InsufficientBalance`] — no royalties to claim.
     pub fn claim_royalties(env: Env, caller: Address, token_id: TokenId) -> Result<(), Error> {
         caller.require_auth();
+        Self::acquire_reentrancy_lock(&env)?;
+        let result = Self::claim_royalties_internal(&env, &caller, token_id);
+        Self::release_reentrancy_lock(&env);
+        result
+    }
 
-        let royalty = Self::load_token(&env, token_id)?.royalty;
+    /// Internal royalty claim logic (caller must hold reentrancy lock).
+    fn claim_royalties_internal(
+        env: &Env,
+        caller: &Address,
+        token_id: TokenId,
+    ) -> Result<(), Error> {
+        let royalty = Self::load_token(env, token_id)?.royalty;
         let recipient = royalty
             .recipients
             .get(0)
             .ok_or(Error::InvalidRoyaltySplit)?
             .recipient;
 
-        if caller != recipient {
+        if caller != &recipient {
             return Err(Error::Unauthorized);
         }
 
@@ -2042,7 +2084,7 @@ impl ClipsNftContract {
             .persistent()
             .remove(&DataKey::RoyaltyBalance(token_id));
 
-        soroban_sdk::token::TokenClient::new(&env, &asset_address)
+        soroban_sdk::token::TokenClient::new(env, &asset_address)
             .transfer(&env.current_contract_address(), &recipient, &balance);
 
         env.events().publish(
@@ -2549,6 +2591,29 @@ impl ClipsNftContract {
         env.storage()
             .persistent()
             .extend_ttl(key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    }
+
+    /// Acquire the contract reentrancy lock before external token calls.
+    fn acquire_reentrancy_lock(env: &Env) -> Result<(), Error> {
+        let locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReentrancyLock)
+            .unwrap_or(false);
+        if locked {
+            return Err(Error::Reentrancy);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyLock, &true);
+        Ok(())
+    }
+
+    /// Release the contract reentrancy lock after external token calls complete.
+    fn release_reentrancy_lock(env: &Env) {
+        env.storage()
+            .instance()
+            .set(&DataKey::ReentrancyLock, &false);
     }
 
     /// Verify the backend Ed25519 signature over the canonical mint payload.
