@@ -30,6 +30,42 @@ if (typeof window !== "undefined") {
   window.Buffer = window.Buffer || Buffer;
 }
 
+/** On-chain token identifier — alias for u32. */
+export type TokenId = u32;
+
+/** Network configurations keyed by network name. */
+export const networks = {
+  testnet: {
+    networkPassphrase: "Test SDF Network ; September 2015",
+    contractId: "",
+    rpcUrl: "https://soroban-testnet.stellar.org",
+  },
+  mainnet: {
+    networkPassphrase: "Public Global Stellar Network ; September 2015",
+    contractId: "",
+    rpcUrl: "https://soroban-mainnet.stellar.org",
+  },
+} as const;
+
+export type NetworkName = keyof typeof networks;
+
+/**
+ * Create a ready-to-use contract client for the given network.
+ *
+ * @example
+ * ```ts
+ * const client = createClient("testnet", { publicKey: walletAddress });
+ * const supply = await (await client.total_supply()).result;
+ * ```
+ */
+export function createClient(
+  network: NetworkName,
+  options?: Partial<ContractClientOptions>
+): Client {
+  const { contractId, networkPassphrase, rpcUrl } = networks[network];
+  return new Client({ contractId, networkPassphrase, rpcUrl, ...options });
+}
+
 
 
 
