@@ -534,6 +534,7 @@ pub struct RoyaltyClaimedEvent {
     pub token_id: TokenId,
     pub recipient: Address,
     pub amount: i128,
+    pub asset: Address,
 }
 
 /// Emitted when the contract admin is changed.
@@ -553,6 +554,15 @@ pub struct CircuitBreakerTriggeredEvent {
     pub window_seconds: u64,
 }
 
+/// Emitted when a soulbound token is recovered to a new owner via platform signature.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SoulboundRecoveredEvent {
+    pub token_id: TokenId,
+    pub old_owner: Address,
+    pub new_owner: Address,
+}
+
 
 /// Emerging Soroban NFT standard interface (ERC-721 adapted).
 /// Documents the expected API surface for marketplace interoperability.
@@ -562,7 +572,14 @@ pub trait NftStandard {
     /// Returns the owner of `token_id`.
     fn owner_of(env: Env, token_id: TokenId) -> Result<Address, Error>;
     /// Transfers `token_id` from `from` to `to`.
-    fn transfer(env: Env, from: Address, to: Address, token_id: TokenId) -> Result<(), Error>;
+    fn transfer(
+        env: Env,
+        from: Address,
+        to: Address,
+        token_id: TokenId,
+        sale_price: i128,
+        payment_asset: Option<Address>,
+    ) -> Result<(), Error>;
     /// Approves `operator` to manage `token_id` (or clears approval when `None`).
     fn approve(env: Env, caller: Address, operator: Option<Address>, token_id: TokenId) -> Result<(), Error>;
     /// Returns the per-token approved operator, if any.
@@ -1190,7 +1207,14 @@ impl ClipsNftContract {
     /// * [`Error::InvalidTokenId`]          — token does not exist.
     /// * [`Error::Unauthorized`]            — `from` is not the owner.
     /// * [`Error::SoulboundTransferBlocked`] — token is soulbound.
-    pub fn transfer(env: Env, from: Address, to: Address, token_id: TokenId) -> Result<(), Error> {
+    pub fn transfer(
+        env: Env,
+        from: Address,
+        to: Address,
+        token_id: TokenId,
+        sale_price: i128,
+        payment_asset: Option<Address>,
+    ) -> Result<(), Error> {
         from.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -1210,6 +1234,73 @@ impl ClipsNftContract {
 
         if data.is_soulbound {
             return Err(Error::SoulboundTransferBlocked);
+        }
+
+        // Handle royalty payment if sale_price is greater than zero
+        if sale_price > 0 {
+            let royalty = data.royalty.clone();
+            let pay_asset = match royalty.asset_address {
+                Some(ref asset) => asset.clone(),
+                None => payment_asset.clone().ok_or(Error::InvalidRecipient)?,
+            };
+
+            // Buyer (to) must authorize the royalty payment
+            to.require_auth();
+
+            Self::acquire_reentrancy_lock(&env)?;
+
+            // Calculate total royalty
+            let mut cumulative_bps: u32 = 0;
+            let mut cumulative_royalty: i128 = 0;
+            for idx in 0..royalty.recipients.len() {
+                let split = royalty.recipients.get(idx).ok_or(Error::InvalidRoyaltySplit)?;
+                cumulative_bps = cumulative_bps.saturating_add(split.basis_points);
+                let total_so_far = Self::calculate_royalty(sale_price, cumulative_bps)?;
+                cumulative_royalty = total_so_far;
+            }
+
+            // Effects: update royalty balance
+            if cumulative_royalty > 0 {
+                let prev: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::RoyaltyBalance(token_id))
+                    .unwrap_or(0);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::RoyaltyBalance(token_id), &(prev.saturating_add(cumulative_royalty)));
+            }
+
+            // Interactions: perform transfers
+            let token_client = soroban_sdk::token::TokenClient::new(&env, &pay_asset);
+            let mut current_bps: u32 = 0;
+            let mut current_royalty: i128 = 0;
+
+            for idx in 0..royalty.recipients.len() {
+                let split = royalty.recipients.get(idx).ok_or(Error::InvalidRoyaltySplit)?;
+
+                current_bps = current_bps.saturating_add(split.basis_points);
+                let total_so_far = Self::calculate_royalty(sale_price, current_bps)?;
+                let amount = total_so_far.saturating_sub(current_royalty);
+                current_royalty = total_so_far;
+
+                if amount == 0 {
+                    continue;
+                }
+
+                token_client.transfer(&to, &split.recipient, &amount);
+                env.events().publish(
+                    (symbol_short!("royalty"),),
+                    RoyaltyPaidEvent {
+                        token_id,
+                        from: to.clone(),
+                        to: split.recipient.clone(),
+                        amount,
+                    },
+                );
+            }
+
+            Self::release_reentrancy_lock(&env);
         }
 
         // Clear per-token approval on transfer.
@@ -1679,6 +1770,107 @@ impl ClipsNftContract {
         env.events().publish(
             (symbol_short!("meta_upd"),),
             MetadataUpdatedEvent { token_id, old_uri, new_uri: data.metadata_uri },
+        );
+
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Soulbound: Social Recovery Hook
+    // -------------------------------------------------------------------------
+
+    /// Recover a soulbound token to a new owner via a trusted platform signature.
+    ///
+    /// When the owner's account is compromised, the platform backend signs a
+    /// recovery payload authorizing the transfer of the soulbound token to a
+    /// new address. This bypasses the normal soulbound transfer restriction.
+    ///
+    /// ## Payload format
+    ///
+    /// ```text
+    /// new_owner_hash = SHA-256(XDR(new_owner))
+    /// message        = SHA-256( "recover" || token_id_le_4_bytes || new_owner_hash )
+    /// ```
+    ///
+    /// The `"recover"` domain separator prevents cross-purpose signature replay
+    /// (e.g., a mint signature cannot be reused as a recovery signature).
+    ///
+    /// Emits: `"sb_recov"` [`SoulboundRecoveredEvent`].
+    ///
+    /// # Arguments
+    /// * `signature` — 64-byte Ed25519 signature from the registered backend signer.
+    /// * `new_owner` — Address that will become the new owner of the token.
+    /// * `token_id`  — ID of the soulbound token to recover.
+    ///
+    /// # Errors
+    /// * [`Error::ContractPaused`]           — contract is paused.
+    /// * [`Error::TokenFrozen`]              — token is frozen.
+    /// * [`Error::InvalidTokenId`]           — token does not exist.
+    /// * [`Error::SoulboundTransferBlocked`] — token is not soulbound.
+    /// * [`Error::SignerNotSet`]             — no backend signer registered.
+    /// * [`Error::InvalidSignature`]         — signature verification failed.
+    pub fn recover_soulbound(
+        env: Env,
+        signature: BytesN<64>,
+        new_owner: Address,
+        token_id: TokenId,
+    ) -> Result<(), Error> {
+        new_owner.require_auth();
+        Self::require_not_paused(&env)?;
+
+        if Self::is_frozen(env.clone(), token_id) {
+            return Err(Error::TokenFrozen);
+        }
+
+        let mut data = Self::load_token(&env, token_id)?;
+
+        // Only soulbound tokens can be recovered via this mechanism.
+        if !data.is_soulbound {
+            return Err(Error::SoulboundTransferBlocked);
+        }
+
+        // Verify the platform signature over the recovery payload.
+        Self::verify_recovery_signature(&env, &new_owner, token_id, &signature)?;
+
+        let old_owner = data.owner.clone();
+
+        // Clear per-token approval on recovery.
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Approved(token_id));
+
+        // Update ownership.
+        data.owner = new_owner.clone();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Token(token_id), &data);
+
+        // Update balances.
+        let old_balance: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Balance(old_owner.clone()))
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(old_owner.clone()), &old_balance.saturating_sub(1));
+
+        let new_balance: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Balance(new_owner.clone()))
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(new_owner.clone()), &(new_balance + 1));
+
+        env.events().publish(
+            (symbol_short!("sb_recov"),),
+            SoulboundRecoveredEvent {
+                token_id,
+                old_owner,
+                new_owner,
+            },
         );
 
         Ok(())
@@ -2290,6 +2482,7 @@ impl ClipsNftContract {
                 token_id,
                 recipient,
                 amount: balance,
+                asset: asset_address,
             },
         );
 
@@ -2991,6 +3184,45 @@ impl ClipsNftContract {
         Ok(())
     }
 
+    /// Verify the backend Ed25519 signature over the recovery payload.
+    ///
+    /// Payload:
+    /// ```text
+    /// new_owner_hash = SHA-256(XDR(new_owner))
+    /// message        = SHA-256( "recover" || token_id_le4 || new_owner_hash )
+    /// ```
+    ///
+    /// The `"recover"` domain separator prevents cross-purpose replay attacks.
+    fn verify_recovery_signature(
+        env: &Env,
+        new_owner: &Address,
+        token_id: TokenId,
+        signature: &BytesN<64>,
+    ) -> Result<(), Error> {
+        let signer: BytesN<32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Signer)
+            .ok_or(Error::SignerNotSet)?;
+
+        let new_owner_hash: BytesN<32> = env
+            .crypto()
+            .sha256(&new_owner.clone().to_xdr(env))
+            .into();
+
+        let mut preimage = Bytes::new(env);
+        preimage.append(&Bytes::from_slice(env, b"recover"));
+        preimage.extend_from_array(&token_id.to_le_bytes());
+        preimage.append(&Bytes::from(new_owner_hash));
+
+        let message: BytesN<32> = env.crypto().sha256(&preimage).into();
+
+        env.crypto()
+            .ed25519_verify(&signer, &Bytes::from(message), signature);
+
+        Ok(())
+    }
+
     /// Assert that `addr` is the stored admin and require its authorization.
     fn require_admin(env: &Env, addr: &Address) -> Result<(), Error> {
         let admin: Address = env
@@ -3509,7 +3741,7 @@ mod tests {
         client.init(&admin);
         let kp = register_signer(&env, &client, &admin);
         let token_id = do_mint(&client, &env, &user1, 1, &kp);
-        client.transfer(&user1, &user2, &token_id);
+        client.transfer(&user1, &user2, &token_id, &0, &None);
         assert_eq!(client.owner_of(&token_id), user2);
     }
 
@@ -3521,7 +3753,7 @@ mod tests {
         client.init(&admin);
         let kp = register_signer(&env, &client, &admin);
         let token_id = do_mint(&client, &env, &user1, 3, &kp);
-        client.transfer(&user1, &user2, &token_id);
+        client.transfer(&user1, &user2, &token_id, &0, &None);
         let events = env.events().all();
         assert_eq!(events.events().len(), 1);
     }
@@ -3657,7 +3889,7 @@ mod tests {
         let token_id = do_mint(&client, &env, &user1, 1, &kp);
         client.pause(&admin);
         env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
-        let result = client.try_transfer(&user1, &user2, &token_id);
+        let result = client.try_transfer(&user1, &user2, &token_id, &0, &None);
         assert_eq!(result, Err(Ok(Error::ContractPaused)));
     }
 
@@ -3672,7 +3904,7 @@ mod tests {
         client.unpause(&admin);
         assert!(!client.is_paused());
         let token_id = do_mint(&client, &env, &user1, 1, &kp);
-        client.transfer(&user1, &user2, &token_id);
+        client.transfer(&user1, &user2, &token_id, &0, &None);
         assert_eq!(client.owner_of(&token_id), user2);
     }
 
@@ -3708,7 +3940,7 @@ mod tests {
         client.init(&admin);
         let kp = register_signer(&env, &client, &admin);
         let token_id = do_mint_soulbound(&client, &env, &user1, 101, &kp);
-        let result = client.try_transfer(&user1, &user2, &token_id);
+        let result = client.try_transfer(&user1, &user2, &token_id, &0, &None);
         assert_eq!(result, Err(Ok(Error::SoulboundTransferBlocked)));
         assert_eq!(client.owner_of(&token_id), user1);
     }
@@ -3722,7 +3954,7 @@ mod tests {
         let kp = register_signer(&env, &client, &admin);
         let token_id = do_mint(&client, &env, &user1, 102, &kp);
         assert!(!client.is_soulbound(&token_id));
-        client.transfer(&user1, &user2, &token_id);
+        client.transfer(&user1, &user2, &token_id, &0, &None);
         assert_eq!(client.owner_of(&token_id), user2);
     }
 
@@ -4009,7 +4241,7 @@ mod tests {
         let kp = register_signer(&env, &client, &admin);
 
         let token_id = do_mint(&client, &env, &user1, 404, &kp);
-        client.transfer(&user1, &user2, &token_id);
+        client.transfer(&user1, &user2, &token_id, &0, &None);
 
         assert_eq!(client.tokens_of_owner(&user1, &None, &None).len(), 0);
         assert_eq!(client.tokens_of_owner(&user2, &None, &None).len(), 1);
@@ -4519,7 +4751,7 @@ mod tests {
         let _t2 = do_mint(&client, &env, &user1, 801, &kp);
         assert_eq!(client.balance_of(&user1), 2);
 
-        client.transfer(&user1, &user2, &t1);
+        client.transfer(&user1, &user2, &t1, &0, &None);
         assert_eq!(client.balance_of(&user1), 1);
         assert_eq!(client.balance_of(&user2), 1);
     }
