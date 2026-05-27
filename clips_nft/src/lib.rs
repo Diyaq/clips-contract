@@ -1837,6 +1837,17 @@ impl ClipsNftContract {
         Self::load_clip_token_id(&env, clip_id).ok_or(Error::InvalidTokenId)
     }
 
+    /// Look up the on-chain token IDs for multiple clip IDs.
+    /// Returns None for clip IDs that have not been minted.
+    pub fn get_tokens_by_clip_ids(env: Env, clip_ids: Vec<u32>) -> Vec<Option<TokenId>> {
+        let mut result = Vec::new(&env);
+        for i in 0..clip_ids.len() {
+            let clip_id = clip_ids.get(i).unwrap();
+            result.push_back(Self::load_clip_token_id(&env, clip_id));
+        }
+        result
+    }
+
     /// Returns the stored [`Royalty`] struct for a token.
     ///
     /// # Errors
@@ -2392,6 +2403,79 @@ impl ClipsNftContract {
                 to: env.current_contract_address(),
             },
         );
+
+        Ok(())
+    }
+
+    /// Burn (destroy) multiple NFTs. Only the current owner may burn the tokens.
+    ///
+    /// Loops through `token_ids` and burns each token if owned by `owner`.
+    /// All burns happen in a single transaction.
+    ///
+    /// Storage removes (persistent): For each token - TokenData, ClipIdMinted
+    ///
+    /// Emits: `"burn"` [`BurnEvent`] per token burned.
+    ///
+    /// # Arguments
+    /// * `owner`   - Owner of the tokens (must authorize and match token ownership)
+    /// * `token_ids` - List of token IDs to burn
+    ///
+    /// # Errors
+    /// * [`Error::TokenFrozen`]   — any token is frozen.
+    /// * [`Error::Unauthorized`]  — owner mismatch for any token.
+    /// * [`Error::InvalidTokenId`] — any token does not exist.
+    pub fn batch_burn(env: Env, owner: Address, token_ids: Vec<TokenId>) -> Result<(), Error> {
+        owner.require_auth();
+
+        // Process each token
+        for i in 0..token_ids.len() {
+            let token_id = token_ids.get(i).unwrap();
+
+            // Validate token is not frozen
+            if Self::is_frozen(env.clone(), token_id) {
+                return Err(Error::TokenFrozen);
+            }
+
+            // Load token data and verify ownership
+            let data: TokenData = Self::load_token(&env, token_id)?;
+            if owner != data.owner {
+                return Err(Error::Unauthorized);
+            }
+
+            // Burn the token (2 persistent removes)
+            env.storage().persistent().remove(&DataKey::Token(token_id));
+            env.storage()
+                .persistent()
+                .remove(&DataKey::ClipIdMinted(data.clip_id));
+
+            // Update total supply
+            let total_supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+            env.storage().instance().set(&DataKey::TotalSupply, &total_supply.saturating_sub(1));
+
+            // Update balance
+            let balance: u32 = env.storage().persistent().get(&DataKey::Balance(owner.clone())).unwrap_or(0);
+            env.storage().persistent().set(&DataKey::Balance(owner.clone()), &balance.saturating_sub(1));
+
+            // Emit Burn event
+            env.events().publish(
+                (symbol_short!("burn"),),
+                BurnEvent {
+                    owner: owner.clone(),
+                    token_id,
+                    clip_id: data.clip_id,
+                },
+            );
+
+            // Emit standard Transfer event for ERC-721 compliance (to zero address)
+            env.events().publish(
+                (symbol_short!("transfer"),),
+                TransferEvent {
+                    token_id,
+                    from: owner.clone(),
+                    to: env.current_contract_address(),
+                },
+            );
+        }
 
         Ok(())
     }
@@ -4705,6 +4789,88 @@ mod tests {
             &None,
         );
         assert_eq!(result, Err(Ok(Error::InvalidTokenId)));
+    }
+
+    // -------------------------------------------------------------------------
+    // get_tokens_by_clip_ids tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_tokens_by_clip_ids_all_minted() {
+        let (env, admin, user1, _) = setup();
+        let contract_id = env.register(ClipsNftContract, ());
+        let client = ClipsNftContractClient::new(&env, &contract_id);
+        client.init(&admin);
+        let kp = register_signer(&env, &client, &admin);
+
+        let t1 = do_mint(&client, &env, &user1, 1000, &kp);
+        let t2 = do_mint(&client, &env, &user1, 1001, &kp);
+        let t3 = do_mint(&client, &env, &user1, 1002, &kp);
+
+        let mut clip_ids = Vec::new(&env);
+        clip_ids.push_back(1000u32);
+        clip_ids.push_back(1001u32);
+        clip_ids.push_back(1002u32);
+
+        let result = client.get_tokens_by_clip_ids(&clip_ids);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get(0).unwrap(), Some(t1));
+        assert_eq!(result.get(1).unwrap(), Some(t2));
+        assert_eq!(result.get(2).unwrap(), Some(t3));
+    }
+
+    #[test]
+    fn test_get_tokens_by_clip_ids_partial_minted() {
+        let (env, admin, user1, _) = setup();
+        let contract_id = env.register(ClipsNftContract, ());
+        let client = ClipsNftContractClient::new(&env, &contract_id);
+        client.init(&admin);
+        let kp = register_signer(&env, &client, &admin);
+
+        // Only mint clip_id 1000
+        let t1 = do_mint(&client, &env, &user1, 1000, &kp);
+
+        let mut clip_ids = Vec::new(&env);
+        clip_ids.push_back(1000u32); // minted
+        clip_ids.push_back(1001u32); // not minted
+        clip_ids.push_back(1002u32); // not minted
+
+        let result = client.get_tokens_by_clip_ids(&clip_ids);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get(0).unwrap(), Some(t1));
+        assert_eq!(result.get(1).unwrap(), None);
+        assert_eq!(result.get(2).unwrap(), None);
+    }
+
+    #[test]
+    fn test_get_tokens_by_clip_ids_empty_input() {
+        let (env, admin, _, _) = setup();
+        let contract_id = env.register(ClipsNftContract, ());
+        let client = ClipsNftContractClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let clip_ids = Vec::new(&env);
+        let result = client.get_tokens_by_clip_ids(&clip_ids);
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_get_tokens_by_clip_ids_all_unminted() {
+        let (env, admin, _, _) = setup();
+        let contract_id = env.register(ClipsNftContract, ());
+        let client = ClipsNftContractClient::new(&env, &contract_id);
+        client.init(&admin);
+
+        let mut clip_ids = Vec::new(&env);
+        clip_ids.push_back(2000u32);
+        clip_ids.push_back(2001u32);
+        clip_ids.push_back(2002u32);
+
+        let result = client.get_tokens_by_clip_ids(&clip_ids);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get(0).unwrap(), None);
+        assert_eq!(result.get(1).unwrap(), None);
+        assert_eq!(result.get(2).unwrap(), None);
     }
 
     // -------------------------------------------------------------------------
