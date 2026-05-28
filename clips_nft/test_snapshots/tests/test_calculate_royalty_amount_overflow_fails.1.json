@@ -38,7 +38,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "bytes": "58d6375bbd4542eb214b9953eca9c300d3335262cf3fd188b52258b11bb2e821"
+                  "bytes": "8e588438b22288baaf598754d327a7dc48110fd23af5478c120ce5eccd3b19ce"
                 }
               ]
             }
@@ -47,6 +47,79 @@
         }
       ]
     ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "function_name": "mint",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u32": 106
+                },
+                {
+                  "string": "ipfs://QmExample"
+                },
+                "void",
+                "void",
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "asset_address"
+                      },
+                      "val": "void"
+                    },
+                    {
+                      "key": {
+                        "symbol": "recipients"
+                      },
+                      "val": {
+                        "vec": [
+                          {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "basis_points"
+                                },
+                                "val": {
+                                  "u32": 500
+                                }
+                              },
+                              {
+                                "key": {
+                                  "symbol": "recipient"
+                                },
+                                "val": {
+                                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "bool": false
+                },
+                {
+                  "bytes": "f146023af9d104d3d833941dceda693c3bc4fb5e2a68abc3b32e2cedcd81d4efba5f9876245279301b16d7928e228a805d56704eeaaafdd3b9adc96b1cb31b00"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -110,7 +183,7 @@
                   "bool": false
                 },
                 {
-                  "bytes": "095fa90f8798cd93f6f4d84dd63d40555b76c389223b8be2ceb681fce38233f7a0d99bfcaa8fd06bb932b0be2cc2748072415def0dc65e185b8ea7b91eaa6b0a"
+                  "bytes": "78779764a5cac28f5800c99472bccaa7407a5a628c474abdbb58a9abc32f85a501cf43e84066c4ba17a809dba45a79548de72332d096a3851ceacf2f767da702"
                 }
               ]
             }
@@ -197,6 +270,26 @@
           "data": {
             "contract_data": {
               "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "4837995959683129791"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
               "key": {
                 "vec": [
@@ -210,7 +303,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 1
+                "u32": 2
               }
             }
           },
@@ -231,13 +324,40 @@
                     "symbol": "ClipIdMinted"
                   },
                   {
-                    "u32": 702
+                    "u32": 106
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
                 "u32": 1
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 535680
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "ClipIdMinted"
+                  },
+                  {
+                    "u32": 702
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u32": 2
               }
             }
           },
@@ -286,6 +406,162 @@
                   },
                   {
                     "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "animation_url"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
+                      "symbol": "attributes"
+                    },
+                    "val": {
+                      "vec": []
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "clip_id"
+                    },
+                    "val": {
+                      "u32": 106
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "description"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
+                      "symbol": "external_url"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
+                      "symbol": "image"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
+                      "symbol": "is_soulbound"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "metadata_uri"
+                    },
+                    "val": {
+                      "string": "ipfs://QmExample"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "owner"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "royalty"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "asset_address"
+                          },
+                          "val": "void"
+                        },
+                        {
+                          "key": {
+                            "symbol": "recipients"
+                          },
+                          "val": {
+                            "vec": [
+                              {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "basis_points"
+                                    },
+                                    "val": {
+                                      "u32": 500
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "recipient"
+                                    },
+                                    "val": {
+                                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "basis_points"
+                                    },
+                                    "val": {
+                                      "u32": 100
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "recipient"
+                                    },
+                                    "val": {
+                                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 535680
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Token"
+                  },
+                  {
+                    "u32": 2
                   }
                 ]
               },
@@ -459,12 +735,72 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "CircuitBreakerEnabled"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerThreshold"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "100"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerWindowCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerWindowSeconds"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "60"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerWindowStart"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "CountMint"
                           }
                         ]
                       },
                       "val": {
-                        "u64": "1"
+                        "u64": "2"
                       }
                     },
                     {
@@ -500,7 +836,7 @@
                         ]
                       },
                       "val": {
-                        "u32": 2
+                        "u32": 3
                       }
                     },
                     {
@@ -536,7 +872,7 @@
                         ]
                       },
                       "val": {
-                        "bytes": "58d6375bbd4542eb214b9953eca9c300d3335262cf3fd188b52258b11bb2e821"
+                        "bytes": "8e588438b22288baaf598754d327a7dc48110fd23af5478c120ce5eccd3b19ce"
                       }
                     },
                     {
@@ -560,7 +896,7 @@
                         ]
                       },
                       "val": {
-                        "u64": "50000"
+                        "u64": "100000"
                       }
                     },
                     {
@@ -572,7 +908,7 @@
                         ]
                       },
                       "val": {
-                        "u32": 1
+                        "u32": 2
                       }
                     }
                   ]
