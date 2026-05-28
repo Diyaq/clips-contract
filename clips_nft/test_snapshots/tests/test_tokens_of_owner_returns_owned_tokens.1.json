@@ -38,7 +38,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "bytes": "0789dd2eeffdfe950a8bcf70df3221624ea878c98d1a2f31edafac344ca46921"
+                  "bytes": "99281abd26508c79ee2460038dd928c83e3bcfbcc5a861e2ac1e203c404e837e"
                 }
               ]
             }
@@ -110,7 +110,7 @@
                   "bool": false
                 },
                 {
-                  "bytes": "b73ce2c3357519dec41a1ae7b618294229591409ed554d33057f1636ede751db972b99692439835ea3e2370d990d2b88c00446ca26d9117598ecaa2484c47209"
+                  "bytes": "7bcc3e0b09cdbad707d1fc5818d4035569647098d3d9eac785620abee364e68bf39b896bc58d18854b8be0afe3d9cf2cdfdaa906949dabb9d977d81d6679da05"
                 }
               ]
             }
@@ -182,7 +182,7 @@
                   "bool": false
                 },
                 {
-                  "bytes": "e9220d5407155c8dabac8b75da3320723f66ec377130c35092883d43aa10e17b551d8386457aa27e92fb6605cb30149ddc03b7beee6b57bf6bb54efcc3d0a30d"
+                  "bytes": "1d7fcf11857f650411f9bc47f7e2ff05eca2160009fd13055836e039378f24281d5d47db9400989fecd0f914d6f6225d17a6c413df49836718a4bed82ec04d07"
                 }
               ]
             }
@@ -254,7 +254,7 @@
                   "bool": false
                 },
                 {
-                  "bytes": "be38557de44b8e0bce0d18c223d7cfbcd1cd3efe5f2248c5f54df9f912f5a69c395254dce2883d1dd40a65c4c776008d6f89b4aa5cfdaac01d865e625cfb4401"
+                  "bytes": "8234686fe127f1d8f7d3c125d6fd103ef23e8e4ec5c19940882e1871dac9bb005ac1fd699618fe0c58e40aeeaafc405d050533f34619b87518b1bd94193fa30c"
                 }
               ]
             }
@@ -263,12 +263,32 @@
         }
       ]
     ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "function_name": "pause",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
     []
   ],
   "ledger": {
     "protocol_version": 25,
     "sequence_number": 0,
-    "timestamp": 0,
+    "timestamp": 86401,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
     "min_persistent_entry_ttl": 4096,
@@ -285,6 +305,26 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "801925984706572462"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "4270020994084947596"
                 }
               },
               "durability": "temporary",
@@ -1063,6 +1103,66 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "CircuitBreakerEnabled"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerThreshold"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "100"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerWindowCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerWindowSeconds"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "60"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "CircuitBreakerWindowStart"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "CountMint"
                           }
                         ]
@@ -1111,12 +1211,24 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "PauseUnlockTime"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u64": "86400"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Paused"
                           }
                         ]
                       },
                       "val": {
-                        "bool": false
+                        "bool": true
                       }
                     },
                     {
@@ -1140,7 +1252,7 @@
                         ]
                       },
                       "val": {
-                        "bytes": "0789dd2eeffdfe950a8bcf70df3221624ea878c98d1a2f31edafac344ca46921"
+                        "bytes": "99281abd26508c79ee2460038dd928c83e3bcfbcc5a861e2ac1e203c404e837e"
                       }
                     },
                     {
