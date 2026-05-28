@@ -2,7 +2,7 @@
 
 mod test_helpers;
 
-use clips_nft::{ClipsNftContract, ClipsNftContractClient, Royalty, RoyaltyRecipient};
+use clips_nft::{ClipsNftContract, ClipsNftContractClient, Error, Royalty, RoyaltyRecipient};
 use soroban_sdk::{
     testutils::{Address as _, BytesN as _, Ledger as _},
     xdr::ToXdr,
@@ -198,6 +198,66 @@ fn test_approval_and_approval_for_all_flow() {
 
     client.approve(&owner, &Some(operator.clone()), &token_id);
     assert_eq!(client.get_approved(&token_id), Some(operator.clone()));
+}
+
+#[test]
+fn test_burned_clip_id_stays_blocked_after_upgrade() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let owner = Address::generate(&env);
+
+    let contract_id = env.register(ClipsNftContract, ());
+    let client = ClipsNftContractClient::new(&env, &contract_id);
+    client.init(&admin);
+
+    let sk_bytes = soroban_sdk::BytesN::<32>::random(&env).to_array();
+    let signer_keypair = ed25519_dalek::SigningKey::from_bytes(&sk_bytes);
+    let pubkey = BytesN::from_array(&env, &signer_keypair.verifying_key().to_bytes());
+    client.set_signer(&admin, &pubkey);
+
+    let clip_id = 77u32;
+    let metadata_uri = String::from_str(&env, "ipfs://QmClip77");
+    let signature = sign_mint(&env, &signer_keypair, &owner, clip_id, &metadata_uri);
+    let mut recipients = Vec::new(&env);
+    recipients.push_back(RoyaltyRecipient {
+        recipient: owner.clone(),
+        basis_points: 500,
+    });
+    let royalty = Royalty {
+        recipients,
+        asset_address: None,
+    };
+
+    let token_id = client.mint(
+        &owner,
+        &clip_id,
+        &metadata_uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &signature,
+    );
+
+    client.upgrade(&admin);
+    client.migrate(&admin);
+    client.burn(&owner, &token_id);
+
+    let remint_signature = sign_mint(&env, &signer_keypair, &owner, clip_id, &metadata_uri);
+    let result = client.try_mint(
+        &owner,
+        &clip_id,
+        &metadata_uri,
+        &None,
+        &None,
+        &royalty,
+        &false,
+        &remint_signature,
+    );
+
+    assert_eq!(result, Err(Ok(Error::ClipAlreadyMinted)));
 }
 
 #[test]
