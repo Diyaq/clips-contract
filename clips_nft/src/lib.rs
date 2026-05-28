@@ -104,6 +104,8 @@ pub enum Error {
     MintCooldownActive = 23,
     /// Reentrant call detected while a guarded entrypoint is executing.
     Reentrancy = 24,
+    /// Minting is explicitly paused by the admin.
+    MintingPaused = 25,
     /// Circuit breaker triggered due to anomalous mint activity.
     CircuitBreakerTripped = 25,
 }
@@ -525,9 +527,9 @@ impl NftStandard for ClipsNftContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        // NextTokenId starts at 1; total_supply = NextTokenId - 1
         env.storage().instance().set(&DataKey::NextTokenId, &1u32);
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().set(&DataKey::MintingPaused, &false);
         env.storage().instance().set(&DataKey::PlatformRecipient, &admin);
         env.storage().instance().set(&DataKey::DefaultRoyaltyAsset, &Option::<Address>::None);
         env.storage()
@@ -565,25 +567,103 @@ impl NftStandard for ClipsNftContract {
         // Signer is not set at init — call set_signer before minting.
     }
 
-    // -------------------------------------------------------------------------
-    // Signer management  ⚠️ PRIVILEGED — admin only
-    // -------------------------------------------------------------------------
+    /// Mints a token and increments the receiver balance map.
+    ///
+    /// Closes #194 - Check if specific minting pause flag is active
+    pub fn mint(
+        env: Env,
+        to: Address,
+        clip_id: u32,
+        metadata_uri: String,
+        royalty_recipients: Vec<RoyaltyRecipient>,
+        asset_address: Option<Address>,
+        is_soulbound: bool,
+    ) -> Result<TokenId, Error> {
+        if Self::check_paused(&env) {
+            return Err(Error::ContractPaused);
+        }
 
-    /// Register (or rotate) the backend Ed25519 public key used to verify
-    /// clip ownership before minting.
+        if Self::is_minting_paused(&env) {
+            return Err(Error::MintingPaused);
+        }
+
+        if env.storage().persistent().has(&DataKey::ClipIdMinted(clip_id)) {
+            return Err(Error::ClipAlreadyMinted);
+        }
+
+        if env.storage().persistent().has(&DataKey::BlacklistedClip(clip_id)) {
+            return Err(Error::ClipBlacklisted);
+        }
+
+        let token_id: u32 = env.storage().instance().get(&DataKey::NextTokenId).unwrap_or(1);
+        env.storage().instance().set(&DataKey::NextTokenId, &(token_id + 1));
+
+        let royalty = Royalty {
+            recipients: royalty_recipients,
+            asset_address,
+        };
+
+        let token_data = TokenData {
+            owner: to.clone(),
+            clip_id,
+            is_soulbound,
+            metadata_uri: metadata_uri.clone(),
+            image: None,
+            animation_url: None,
+            description: None,
+            external_url: None,
+            attributes: Vec::new(&env),
+            royalty,
+        };
+
+        env.storage().persistent().set(&DataKey::Token(token_id), &token_data);
+        env.storage().persistent().set(&DataKey::ClipIdMinted(clip_id), &token_id);
+
+        let current_bal = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0u32);
+        env.storage().persistent().set(&DataKey::Balance(to.clone()), &(current_bal + 1));
+
+        env.events().publish(
+            (symbol_short!("mint"),),
+            MintEvent {
+                to,
+                clip_id,
+                token_id,
+                metadata_uri,
+            },
+        );
+
+        Ok(token_id)
+    }
+
+    /// Pause minting operations only. Existing tokens can still be transferred.
     ///
-    /// ⚠️ **Access Control: Admin only.**
+    /// Closes #194
+    pub fn pause_minting(env: Env, admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::MintingPaused, &true);
+        env.events().publish((symbol_short!("p_mint"),), ());
+        Ok(())
+    }
+
+    /// Unpause minting operations.
     ///
-    /// # Arguments
-    /// * `admin`  — Must be the contract admin.
-    /// * `pubkey` — 32-byte Ed25519 public key of the trusted backend signer.
+    /// Closes #194
+    pub fn unpause_minting(env: Env, admin: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::MintingPaused, &false);
+        env.events().publish((symbol_short!("up_mint"),), ());
+        Ok(())
+    }
+
+    /// Returns `true` if minting operations are currently paused.
+    pub fn is_minting_paused(env: &Env) -> bool {
+        env.storage().instance().get(&DataKey::MintingPaused).unwrap_or(false)
+    }
+
     pub fn set_signer(env: Env, admin: Address, pubkey: BytesN<32>) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Signer, &pubkey);
-        env.events().publish(
-            (symbol_short!("sgn_upd"),),
-            SignerUpdatedEvent { new_pubkey: pubkey },
-        );
+        env.events().publish((symbol_short!("sgn_upd"),), SignerUpdatedEvent { new_pubkey: pubkey });
         Ok(())
     }
 
@@ -656,10 +736,7 @@ impl NftStandard for ClipsNftContract {
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
-        env.events().publish(
-            (symbol_short!("upgrade"),),
-            UpgradeEvent { new_wasm_hash },
-        );
+        env.events().publish((symbol_short!("upgrade"),), UpgradeEvent { new_wasm_hash });
         Ok(())
     }
 
@@ -761,13 +838,10 @@ impl NftStandard for ClipsNftContract {
     /// Emits: `"pause_sched"` [`PauseScheduledEvent`] with the activation timestamp.
     pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
-        let active_at = env.ledger().timestamp().saturating_add(86_400); // 24 hours
+        let active_at = env.ledger().timestamp().saturating_add(86_400);
         env.storage().instance().set(&DataKey::PauseUnlockTime, &active_at);
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish(
-            (symbol_short!("pse_sched"),),
-            PauseScheduledEvent { active_at },
-        );
+        env.events().publish((symbol_short!("pse_sched"),), PauseScheduledEvent { active_at });
         Ok(())
     }
 
