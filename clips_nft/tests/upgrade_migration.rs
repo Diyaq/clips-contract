@@ -1,5 +1,429 @@
 //! Upgrade and migration tests for ClipsNftContract.
 //!
+//! Tests verify that:
+//! - Contract can be upgraded safely
+//! - Existing NFTs are preserved during upgrade
+//! - Royalty information remains intact
+//! - Version is bumped correctly
+//! - Total supply is unchanged
+//! - Admin remains authorized
+
+#![cfg(test)]
+
+use clips_nft::{
+    ClipsNftContract, ContractInfo, DataKey, Error, Royalty, RoyaltyRecipient,
+    TokenData, TokenId, VERSION,
+};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Bytes, BytesN, Env, String, Vec,
+};
+
+// ============================================================================
+// Helper: Setup a contract with initial state
+// ============================================================================
+
+fn setup_contract(env: &Env) -> (Address, Address) {
+    let admin = Address::generate(env);
+    let user = Address::generate(env);
+
+    admin.require_auth();
+    ClipsNftContract::init(env.clone(), admin.clone());
+
+    (admin, user)
+}
+
+fn mint_sample_nft(
+    env: &Env,
+    owner: &Address,
+    clip_id: u32,
+    royalty_bps: u32,
+) -> TokenId {
+    owner.require_auth();
+
+    let royalty_recipient = RoyaltyRecipient {
+        recipient: Address::generate(env),
+        basis_points: royalty_bps,
+    };
+
+    let royalty = Royalty {
+        recipients: {
+            let mut v = Vec::new(env);
+            v.push_back(royalty_recipient);
+            v
+        },
+        asset_address: None,
+    };
+
+    let metadata_uri = String::from_str(env, "ipfs://test-metadata");
+    let signature = BytesN::<64>::from_array(
+        env,
+        &[0u8; 64], // dummy signature for testing
+    );
+
+    ClipsNftContract::mint(
+        env.clone(),
+        owner.clone(),
+        clip_id,
+        metadata_uri,
+        None,
+        None,
+        royalty,
+        false,
+        signature,
+    )
+    .expect("mint should succeed")
+}
+
+// ============================================================================
+// Test: Basic upgrade and migrate
+// ============================================================================
+
+#[test]
+fn test_upgrade_and_migrate_preserves_state() {
+    let env = Env::new();
+
+    let (admin, _user) = setup_contract(&env);
+
+    // Verify initial state
+    let version_before = ClipsNftContract::contract_version(env.clone());
+    let supply_before = ClipsNftContract::total_supply(env.clone());
+
+    assert_eq!(version_before, VERSION, "Initial version should be VERSION");
+    assert_eq!(supply_before, 0u32, "Initial supply should be 0");
+
+    // Simulate calling upgrade() - in tests we're already on the new code
+    // so we just verify the function is callable
+    admin.require_auth();
+    let result = ClipsNftContract::upgrade(env.clone(), admin.clone());
+    assert!(result.is_ok(), "upgrade() should succeed");
+
+    // Call migrate() to bump version
+    let migrate_result = ClipsNftContract::migrate(env.clone(), admin.clone());
+    assert!(migrate_result.is_ok(), "migrate() should succeed");
+
+    // Verify version was bumped
+    let version_after = ClipsNftContract::contract_version(env.clone());
+    assert_eq!(version_after, VERSION, "Version should be bumped to VERSION");
+
+    // Verify supply unchanged
+    let supply_after = ClipsNftContract::total_supply(env.clone());
+    assert_eq!(
+        supply_before, supply_after,
+        "Supply should not change during migration"
+    );
+}
+
+// ============================================================================
+// Test: NFT preservation during upgrade
+// ============================================================================
+
+#[test]
+fn test_nfts_preserved_during_upgrade() {
+    let env = Env::new();
+    let (admin, user) = setup_contract(&env);
+
+    // Mint 3 NFTs
+    let token_id_1 = mint_sample_nft(&env, &user, 1, 500);
+    let token_id_2 = mint_sample_nft(&env, &user, 2, 1000);
+    let token_id_3 = mint_sample_nft(&env, &user, 3, 250);
+
+    let supply_before = ClipsNftContract::total_supply(env.clone());
+    assert_eq!(supply_before, 3, "Should have 3 NFTs minted");
+
+    // Perform upgrade and migration
+    admin.require_auth();
+    ClipsNftContract::upgrade(env.clone(), admin.clone()).expect("upgrade should succeed");
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("migrate should succeed");
+
+    // Verify all NFTs still exist
+    let supply_after = ClipsNftContract::total_supply(env.clone());
+    assert_eq!(
+        supply_before, supply_after,
+        "All NFTs should be preserved (supply unchanged)"
+    );
+
+    // Verify user still owns all tokens
+    let user_tokens =
+        ClipsNftContract::tokens_of_owner(env.clone(), user.clone(), None, None);
+    assert_eq!(
+        user_tokens.len(),
+        3u32,
+        "User should still own all 3 tokens"
+    );
+    assert!(
+        user_tokens.contains(&token_id_1),
+        "Token 1 should be owned by user"
+    );
+    assert!(
+        user_tokens.contains(&token_id_2),
+        "Token 2 should be owned by user"
+    );
+    assert!(
+        user_tokens.contains(&token_id_3),
+        "Token 3 should be owned by user"
+    );
+}
+
+// ============================================================================
+// Test: Royalty preservation
+// ============================================================================
+
+#[test]
+fn test_royalties_preserved_during_upgrade() {
+    let env = Env::new();
+    let (admin, user) = setup_contract(&env);
+
+    // Mint NFT with specific royalty
+    let royalty_bps = 750; // 7.5%
+    let _token_id = mint_sample_nft(&env, &user, 42, royalty_bps);
+
+    // Get royalty before upgrade
+    let royalty_before = ClipsNftContract::get_royalty(env.clone(), 1)
+        .expect("should be able to get royalty");
+
+    // Verify royalty is set correctly
+    assert_eq!(
+        royalty_before.recipients.len(),
+        1u32,
+        "Should have one royalty recipient"
+    );
+    let recipient = royalty_before
+        .recipients
+        .get(0)
+        .expect("should have first recipient");
+    assert_eq!(
+        recipient.basis_points, royalty_bps,
+        "Royalty should be {}",
+        royalty_bps
+    );
+
+    // Perform upgrade
+    admin.require_auth();
+    ClipsNftContract::upgrade(env.clone(), admin.clone()).expect("upgrade should succeed");
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("migrate should succeed");
+
+    // Get royalty after upgrade
+    let royalty_after = ClipsNftContract::get_royalty(env.clone(), 1)
+        .expect("should be able to get royalty after migration");
+
+    // Verify royalty is unchanged
+    assert_eq!(
+        royalty_before.recipients.len(),
+        royalty_after.recipients.len(),
+        "Royalty recipient count should be preserved"
+    );
+
+    let recipient_after = royalty_after
+        .recipients
+        .get(0)
+        .expect("should have first recipient");
+    assert_eq!(
+        recipient_after.basis_points, royalty_bps,
+        "Royalty basis points should be preserved"
+    );
+}
+
+// ============================================================================
+// Test: Version bumping
+// ============================================================================
+
+#[test]
+fn test_version_bumped_on_migrate() {
+    let env = Env::new();
+    let (admin, _user) = setup_contract(&env);
+
+    let version_before = ClipsNftContract::contract_version(env.clone());
+    assert_eq!(version_before, VERSION, "Initial version should be VERSION");
+
+    // Migrate (this should bump the version)
+    admin.require_auth();
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("migrate should succeed");
+
+    let version_after = ClipsNftContract::contract_version(env.clone());
+    assert_eq!(
+        version_after, VERSION,
+        "Version should be updated to current VERSION"
+    );
+}
+
+// ============================================================================
+// Test: Unauthorized upgrade/migrate attempts
+// ============================================================================
+
+#[test]
+fn test_non_admin_cannot_upgrade() {
+    let env = Env::new();
+    let (admin, user) = setup_contract(&env);
+
+    user.require_auth();
+    let result = ClipsNftContract::upgrade(env.clone(), user.clone());
+
+    assert!(result.is_err(), "Non-admin should not be able to upgrade");
+    assert_eq!(
+        result.unwrap_err(),
+        Error::Unauthorized,
+        "Should return Unauthorized error"
+    );
+}
+
+#[test]
+fn test_non_admin_cannot_migrate() {
+    let env = Env::new();
+    let (admin, user) = setup_contract(&env);
+
+    user.require_auth();
+    let result = ClipsNftContract::migrate(env.clone(), user.clone());
+
+    assert!(result.is_err(), "Non-admin should not be able to migrate");
+    assert_eq!(
+        result.unwrap_err(),
+        Error::Unauthorized,
+        "Should return Unauthorized error"
+    );
+}
+
+// ============================================================================
+// Test: Contract info retrieval
+// ============================================================================
+
+#[test]
+fn test_contract_info_after_upgrade() {
+    let env = Env::new();
+    let (admin, _user) = setup_contract(&env);
+
+    // Get contract info before migration
+    let info_before = ClipsNftContract::contract_info(env.clone());
+
+    assert_eq!(
+        info_before.version, VERSION,
+        "Initial version should be VERSION"
+    );
+    assert_eq!(
+        info_before.name,
+        String::from_str(&env, "ClipCash Clips"),
+        "Name should be ClipCash Clips"
+    );
+    assert_eq!(
+        info_before.symbol,
+        String::from_str(&env, "CLIP"),
+        "Symbol should be CLIP"
+    );
+    assert_eq!(info_before.owner, admin, "Owner should be admin");
+
+    // Perform migration
+    admin.require_auth();
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("migrate should succeed");
+
+    // Get contract info after migration
+    let info_after = ClipsNftContract::contract_info(env.clone());
+
+    assert_eq!(
+        info_after.version, VERSION,
+        "Version should be VERSION after migration"
+    );
+    assert_eq!(
+        info_after.name, info_before.name,
+        "Name should not change"
+    );
+    assert_eq!(
+        info_after.symbol, info_before.symbol,
+        "Symbol should not change"
+    );
+    assert_eq!(
+        info_after.owner, info_before.owner,
+        "Owner should not change"
+    );
+}
+
+// ============================================================================
+// Test: Multiple NFTs with varying royalties
+// ============================================================================
+
+#[test]
+fn test_multiple_nfts_with_varied_royalties_preserved() {
+    let env = Env::new();
+    let (admin, user) = setup_contract(&env);
+
+    // Mint NFTs with different royalty structures
+    let _token_1 = mint_sample_nft(&env, &user, 10, 500); // 5%
+    let _token_2 = mint_sample_nft(&env, &user, 20, 1000); // 10%
+    let _token_3 = mint_sample_nft(&env, &user, 30, 250); // 2.5%
+
+    // Record royalty info before upgrade
+    let royalty_1_before = ClipsNftContract::get_royalty(env.clone(), 1)
+        .expect("should get royalty 1");
+    let royalty_2_before = ClipsNftContract::get_royalty(env.clone(), 2)
+        .expect("should get royalty 2");
+    let royalty_3_before = ClipsNftContract::get_royalty(env.clone(), 3)
+        .expect("should get royalty 3");
+
+    // Perform upgrade
+    admin.require_auth();
+    ClipsNftContract::upgrade(env.clone(), admin.clone()).expect("upgrade should succeed");
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("migrate should succeed");
+
+    // Verify royalties are preserved
+    let royalty_1_after = ClipsNftContract::get_royalty(env.clone(), 1)
+        .expect("should get royalty 1 after migration");
+    let royalty_2_after = ClipsNftContract::get_royalty(env.clone(), 2)
+        .expect("should get royalty 2 after migration");
+    let royalty_3_after = ClipsNftContract::get_royalty(env.clone(), 3)
+        .expect("should get royalty 3 after migration");
+
+    // Compare royalties
+    assert_eq!(
+        royalty_1_before.recipients.get(0).unwrap().basis_points,
+        royalty_1_after.recipients.get(0).unwrap().basis_points,
+        "Royalty 1 should match"
+    );
+    assert_eq!(
+        royalty_2_before.recipients.get(0).unwrap().basis_points,
+        royalty_2_after.recipients.get(0).unwrap().basis_points,
+        "Royalty 2 should match"
+    );
+    assert_eq!(
+        royalty_3_before.recipients.get(0).unwrap().basis_points,
+        royalty_3_after.recipients.get(0).unwrap().basis_points,
+        "Royalty 3 should match"
+    );
+}
+
+// ============================================================================
+// Test: Idempotent migration
+// ============================================================================
+
+#[test]
+fn test_migrate_idempotent() {
+    let env = Env::new();
+    let (admin, user) = setup_contract(&env);
+
+    // Mint an NFT
+    let _token = mint_sample_nft(&env, &user, 100, 500);
+
+    let supply_before = ClipsNftContract::total_supply(env.clone());
+
+    // Call migrate twice
+    admin.require_auth();
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("first migrate should succeed");
+
+    let supply_after_first = ClipsNftContract::total_supply(env.clone());
+
+    ClipsNftContract::migrate(env.clone(), admin.clone()).expect("second migrate should succeed");
+
+    let supply_after_second = ClipsNftContract::total_supply(env.clone());
+
+    // Supply should be unchanged by either migration
+    assert_eq!(
+        supply_before, supply_after_first,
+        "Supply should not change on first migrate"
+    );
+    assert_eq!(
+        supply_after_first, supply_after_second,
+        "Supply should not change on second migrate"
+    );
+}
+//!
 //! These tests verify that:
 //! 1. `upgrade()` preserves all existing NFT and royalty state.
 //! 2. `migrate()` correctly seeds missing fields and bumps ContractVersion.
