@@ -287,6 +287,8 @@ pub enum DataKey {
     CustomTokenUri(TokenId),
     /// Ed25519 public key of the trusted backend signer (instance).
     Signer,
+    /// Backend address authorized to refresh metadata (instance).
+    BackendAddress,
     /// Platform address that always receives the default 1 % royalty cut (instance).
     PlatformRecipient,
     /// Per-token approval: token_id → approved operator (persistent).
@@ -620,8 +622,11 @@ pub trait NftStandard {
 #[contract]
 pub struct ClipsNftContract;
 
-#[allow(deprecated)]
-/// Synthetic gas constants for tracking (approximations)
+/// Synthetic gas constants for fee estimation (approximations).
+///
+/// These are fixed estimates used for tracking and fee estimation purposes.
+/// They do not reflect actual gas costs but provide consistent values for
+/// contract analytics and user-facing fee estimates.
 const GAS_BASE_MINT: u64 = 50_000;
 const GAS_BASE_TRANSFER: u64 = 30_000;
 const MAX_BATCH_MINT: u32 = 25;
@@ -675,6 +680,10 @@ impl ClipsNftContract {
         env.storage()
             .instance()
             .set(&DataKey::CircuitBreakerWindowCount, &0u64);
+        // Initialize backend address to admin by default
+        env.storage()
+            .instance()
+            .set(&DataKey::BackendAddress, &admin);
         // Signer is not set at init — call set_signer before minting.
     }
 
@@ -703,6 +712,24 @@ impl ClipsNftContract {
     /// Return the currently registered backend signer public key, if any.
     pub fn get_signer(env: Env) -> Option<BytesN<32>> {
         env.storage().instance().get(&DataKey::Signer)
+    }
+
+    /// Set the backend address authorized to refresh metadata.
+    ///
+    /// ⚠️ **Access Control: Admin only.**
+    ///
+    /// # Arguments
+    /// * `admin`          — Must be the contract admin.
+    /// * `backend_address` — Address authorized to call refresh_metadata.
+    pub fn set_backend_address(env: Env, admin: Address, backend_address: Address) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::BackendAddress, &backend_address);
+        Ok(())
+    }
+
+    /// Return the currently registered backend address, if any.
+    pub fn get_backend_address(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::BackendAddress)
     }
 
     /// Transfer contract admin rights to a new address.
@@ -1520,24 +1547,24 @@ impl ClipsNftContract {
 
     /// Push updated metadata from the backend (e.g. after virality score changes).
     ///
-    /// Callable by the contract admin **or** the registered backend signer address.
+    /// Callable by the contract admin **or** the registered backend address.
     /// Limited to once per 30 days per token to prevent abuse.
     ///
     /// Emits: `"meta_upd"` [`MetadataUpdatedEvent`].
     ///
     /// # Arguments
-    /// * `caller`   — Must be the admin or the registered signer address.
+    /// * `caller`   — Must be the admin or the registered backend address.
     /// * `token_id` — Token whose metadata URI is being refreshed.
     /// * `new_uri`  — New metadata URI.
     ///
     /// # Errors
-    /// * [`Error::Unauthorized`]           — caller is neither admin nor signer.
+    /// * [`Error::Unauthorized`]           — caller is neither admin nor backend address.
     /// * [`Error::InvalidTokenId`]         — token does not exist.
     /// * [`Error::MetadataRefreshTooSoon`] — 30-day cooldown has not elapsed.
-    /// Refresh token metadata (admin or signer only, 30-day cooldown).
+    /// Refresh token metadata (admin or backend address only, 30-day cooldown).
     ///
     /// # Arguments
-    /// * `caller` — Must be the admin or registered signer.
+    /// * `caller` — Must be the admin or registered backend address.
     /// * `token_id` — Token to update.
     /// * `new_uri` — New metadata URI (optional). Pass `None` to leave unchanged.
     /// * `image` — New static thumbnail URL (optional). Must start with "https://" or "ipfs://".
@@ -1546,7 +1573,7 @@ impl ClipsNftContract {
     ///   Pass `None` to leave unchanged. Pass `Some("")` to clear the field.
     ///
     /// # Errors
-    /// * [`Error::Unauthorized`] — caller is not admin or signer.
+    /// * [`Error::Unauthorized`] — caller is not admin or backend address.
     /// * [`Error::InvalidTokenId`] — token does not exist.
     /// * [`Error::MetadataRefreshTooSoon`] — 30-day cooldown not elapsed.
     /// * [`Error::InvalidImageUrl`] — image URL does not start with "https://" or "ipfs://".
@@ -1561,7 +1588,7 @@ impl ClipsNftContract {
     ) -> Result<(), Error> {
         caller.require_auth();
 
-        // Allow admin or the registered signer address.
+        // Allow admin or the registered backend address.
         let admin: Address = env
             .storage()
             .instance()
@@ -1569,19 +1596,16 @@ impl ClipsNftContract {
             .expect("Admin not initialized");
 
         let is_admin = caller == admin;
-        let is_signer = env
+        
+        // Check if caller is the registered backend address
+        let is_backend = env
             .storage()
             .instance()
-            .get::<DataKey, BytesN<32>>(&DataKey::Signer)
-            .map(|_| {
-                // The signer is a pubkey, not an Address. We allow the admin to
-                // act on behalf of the backend. For on-chain signer-address
-                // authorization, callers pass the admin address.
-                false
-            })
+            .get::<DataKey, Address>(&DataKey::BackendAddress)
+            .map(|backend_addr| caller == backend_addr)
             .unwrap_or(false);
 
-        if !is_admin && !is_signer {
+        if !is_admin && !is_backend {
             return Err(Error::Unauthorized);
         }
 
@@ -2384,9 +2408,7 @@ impl ClipsNftContract {
         let mut data = Self::load_token(&env, token_id)?;
         let old_royalty = data.royalty.clone();
 
-        let new_royalty = Self::normalize_royalty(&env, new_royalty)?;
-
-        // Emit event if primary recipient changed
+        // Emit event if primary recipient changed (compare before normalization)
         if !old_royalty.recipients.is_empty() && !new_royalty.recipients.is_empty() {
             let old_recipient = old_royalty.recipients.get(0).ok_or(Error::InvalidRoyaltySplit)?;
             let new_recipient = new_royalty.recipients.get(0).ok_or(Error::InvalidRoyaltySplit)?;
@@ -2402,6 +2424,8 @@ impl ClipsNftContract {
                 );
             }
         }
+
+        let new_royalty = Self::normalize_royalty(&env, new_royalty)?;
 
         data.royalty = new_royalty;
         env.storage()
@@ -4748,6 +4772,62 @@ mod tests {
         assert_eq!(result, Ok(60_000_000_000_000i128));
     }
 
+    #[test]
+    fn test_royalty_max_basis_points_at_max_safe_price() {
+        // Test maximum basis points (10,000 = 100%) at maximum safe price
+        let max_safe = i128::MAX / 10_000;
+        let result = ClipsNftContract::calculate_royalty(max_safe, 10_000);
+        assert!(result.is_ok());
+        // 100% of max_safe should equal max_safe (with rounding)
+        assert_eq!(result.unwrap(), max_safe);
+    }
+
+    #[test]
+    fn test_royalty_min_basis_points_at_max_safe_price() {
+        // Test minimum basis points (1 = 0.01%) at maximum safe price
+        let max_safe = i128::MAX / 10_000;
+        let result = ClipsNftContract::calculate_royalty(max_safe, 1);
+        assert!(result.is_ok());
+        // Should be approximately 0.01% of max_safe
+        let expected = (max_safe + 5_000) / 10_000;
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_royalty_rounding_at_boundary() {
+        // Test rounding behavior with the +5,000 offset
+        // (sale_price * basis_points + 5_000) / 10_000
+        let result = ClipsNftContract::calculate_royalty(10_000, 1);
+        // (10_000 * 1 + 5_000) / 10_000 = 15_000 / 10_000 = 1
+        assert_eq!(result, Ok(1));
+    }
+
+    #[test]
+    fn test_royalty_accumulation_does_not_overflow() {
+        // Test that multiple royalty calculations in sequence don't overflow
+        let max_safe = i128::MAX / 10_000;
+        // First calculation at max safe price
+        let result1 = ClipsNftContract::calculate_royalty(max_safe, 5_000);
+        assert!(result1.is_ok());
+        // Second calculation should also work
+        let result2 = ClipsNftContract::calculate_royalty(max_safe, 5_000);
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_royalty_negative_sale_price_fails() {
+        // Negative sale prices should be rejected
+        let result = ClipsNftContract::calculate_royalty(-1, 500);
+        assert_eq!(result, Err(Error::InvalidSalePrice));
+    }
+
+    #[test]
+    fn test_royalty_i128_min_fails() {
+        // i128::MIN should be rejected as invalid sale price
+        let result = ClipsNftContract::calculate_royalty(i128::MIN, 500);
+        assert_eq!(result, Err(Error::InvalidSalePrice));
+    }
+
     // -------------------------------------------------------------------------
     // Issue #117: refresh_metadata with 30-day cooldown
     // -------------------------------------------------------------------------
@@ -4890,6 +4970,49 @@ mod tests {
             &None,
         );
         assert_eq!(result, Err(Ok(Error::InvalidTokenId)));
+    }
+
+    #[test]
+    fn test_refresh_metadata_backend_address_success() {
+        let (env, admin, user1, backend) = setup();
+        let contract_id = env.register(ClipsNftContract, ());
+        let client = ClipsNftContractClient::new(&env, &contract_id);
+        client.init(&admin);
+        let kp = register_signer(&env, &client, &admin);
+        
+        // Set backend address
+        client.set_backend_address(&admin, &backend);
+        
+        let token_id = do_mint(&client, &env, &user1, 2005, &kp);
+        let new_uri = String::from_str(&env, "ipfs://QmBackendRefresh");
+        
+        // Backend should be able to refresh metadata
+        client.refresh_metadata(&backend, &token_id, &Some(new_uri.clone()), &None, &None);
+        assert_eq!(client.token_uri(&token_id), new_uri);
+    }
+
+    #[test]
+    fn test_refresh_metadata_backend_address_unauthorized_fails() {
+        let (env, admin, user1, user2) = setup();
+        let contract_id = env.register(ClipsNftContract, ());
+        let client = ClipsNftContractClient::new(&env, &contract_id);
+        client.init(&admin);
+        let kp = register_signer(&env, &client, &admin);
+        
+        // Set user2 as backend address
+        client.set_backend_address(&admin, &user2);
+        
+        let token_id = do_mint(&client, &env, &user1, 2006, &kp);
+        
+        // user1 should not be able to refresh metadata (not admin, not backend)
+        let result = client.try_refresh_metadata(
+            &user1,
+            &token_id,
+            &Some(String::from_str(&env, "ipfs://QmHack")),
+            &None,
+            &None,
+        );
+        assert_eq!(result, Err(Ok(Error::Unauthorized)));
     }
 
     // -------------------------------------------------------------------------
