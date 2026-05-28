@@ -6,7 +6,25 @@
   },
   "auth": [
     [],
-    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "function_name": "init",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
@@ -20,7 +38,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "bytes": "c8c9056b11f49832a81cd9a1ddcb83e40794ca4c214660410ed16c37c85936c0"
+                  "bytes": "41548c4c526f32449df62aec10b51a62b00bcfbda985b1c3141376363b66739d"
                 }
               ]
             }
@@ -42,7 +60,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "u32": 101
+                  "u32": 1
                 },
                 {
                   "string": "ipfs://QmExample"
@@ -90,7 +108,10 @@
                   "bool": true
                 },
                 {
-                  "bytes": "bc92d2ae2ea0b29fd254487a864fa50c55c97e6790c796ed5680a8cdde9990a75b15c361a7b4a036915b49f09dcf83561954a8674b215c11bd98d71c01389100"
+                  "u32": 0
+                },
+                {
+                  "bytes": "601a314a5a0fe1f10cb39e8c961c101ccde9cfc4563f60d871a7ca326cd51d552b8307204609c94dfa48d79bdaee08a1d70405959d23c2f51201e227b392e108"
                 }
               ]
             }
@@ -99,7 +120,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -138,10 +158,30 @@
           "data": {
             "contract_data": {
               "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "5541220902715666415"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "1033654523790656264"
                 }
               },
               "durability": "temporary",
@@ -165,7 +205,34 @@
                     "symbol": "ClipIdMinted"
                   },
                   {
-                    "u32": 101
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u32": 1
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "CollectionCount"
+                  },
+                  {
+                    "u32": 0
                   }
                 ]
               },
@@ -204,7 +271,15 @@
                       "symbol": "clip_id"
                     },
                     "val": {
-                      "u32": 101
+                      "u32": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "collection_id"
+                    },
+                    "val": {
+                      "u32": 0
                     }
                   },
                   {
@@ -375,7 +450,7 @@
                         ]
                       },
                       "val": {
-                        "bytes": "c8c9056b11f49832a81cd9a1ddcb83e40794ca4c214660410ed16c37c85936c0"
+                        "bytes": "41548c4c526f32449df62aec10b51a62b00bcfbda985b1c3141376363b66739d"
                       }
                     }
                   ]

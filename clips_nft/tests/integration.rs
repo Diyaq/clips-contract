@@ -76,13 +76,14 @@ fn test_integration_wallet_simulation_mint_and_royalty() {
     // User "connects" wallet and calls mint
     // The call to `mint` will require user_wallet's authorization, which is provided by `mock_all_auths()`.
     let token_id = client.mint(
-        &user_wallet,
-        &clip_id,
-        &metadata_uri,
-        &royalty,
-        &false,
-        &signature
-    );
+            &user_wallet,
+            &clip_id,
+            &metadata_uri,
+            &royalty,
+            &false,
+            &0u32,
+            &signature
+        );
     
     // Verify Mint Result
     assert_eq!(token_id, 1);
@@ -132,7 +133,9 @@ fn test_integration_wallet_simulation_mint_and_royalty() {
     let result = client.try_transfer(&new_owner, &user_wallet, &token_id);
     assert!(result.is_err());
     
-    // Unpause
+    // Unpause — advance ledger past the 24-hour timelock first
+    use soroban_sdk::testutils::Ledger as _;
+    env.ledger().set_sequence_number(env.ledger().sequence() + clips_nft::PAUSE_TIMELOCK_LEDGERS);
     client.unpause(&admin);
     assert!(!client.is_paused());
     

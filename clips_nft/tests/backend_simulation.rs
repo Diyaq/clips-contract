@@ -91,7 +91,7 @@ fn test_mint_after_metadata_upload() {
         asset_address: None, // XLM
     };
 
-    let token_id = client.mint(&user, &clip_id, &metadata_uri, &royalty, &false, &signature);
+    let token_id = client.mint(&user, &clip_id, &metadata_uri, &royalty, &false, &0u32, &signature);
 
     // Verification
     assert_eq!(token_id, 1);
@@ -133,7 +133,7 @@ fn test_royalty_on_secondary_sale() {
         asset_address: Some(token_address.clone()),
     };
 
-    let token_id = client.mint(&creator, &clip_id, &metadata_uri, &royalty, &false, &signature);
+    let token_id = client.mint(&creator, &clip_id, &metadata_uri, &royalty, &false, &0u32, &signature);
 
     // 2. Primary sale: creator -> buyer1 (handled off-chain or via another contract, here we just transfer)
     client.transfer(&creator, &buyer1, &token_id);
@@ -175,13 +175,13 @@ fn test_error_cases() {
 
     // Case 1: Invalid Signature (tampered clip_id)
     let signature = backend.sign_mint(&env, &user, clip_id, &metadata_uri);
-    let result = client.try_mint(&user, &(clip_id + 1), &metadata_uri, &royalty, &false, &signature);
+    let result = client.try_mint(&user, &(clip_id + 1), &metadata_uri, &royalty, &false, &0u32, &signature);
     assert!(result.is_err());
     // We can check the exact error if we want, but is_err is usually enough for integration tests
     
     // Case 2: Double Minting the same clip_id
-    client.mint(&user, &clip_id, &metadata_uri, &royalty, &false, &signature);
-    let result = client.try_mint(&user, &clip_id, &metadata_uri, &royalty, &false, &signature);
+    client.mint(&user, &clip_id, &metadata_uri, &royalty, &false, &0u32, &signature);
+    let result = client.try_mint(&user, &clip_id, &metadata_uri, &royalty, &false, &0u32, &signature);
     assert!(result.is_err());
 
     // Case 3: Unauthorized set_signer
@@ -194,4 +194,7 @@ fn test_error_cases() {
     client.pause(&admin);
     let result = client.try_transfer(&user, &malicious, &token_id);
     assert!(result.is_err());
+    // Advance ledger past timelock so the contract can be unpaused in future tests
+    use soroban_sdk::testutils::Ledger as _;
+    env.ledger().set_sequence_number(env.ledger().sequence() + clips_nft::PAUSE_TIMELOCK_LEDGERS);
 }

@@ -6,7 +6,25 @@
   },
   "auth": [
     [],
-    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "function_name": "init",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
@@ -20,7 +38,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
-                  "bytes": "a1806f65475d5018949a53b1dc5b9abda878a30fc5c18fdbdf527577eb24b905"
+                  "bytes": "4694f9c7e851e4138d0eb605730b66346d456f5122fb46588251e56b844990a9"
                 }
               ]
             }
@@ -90,7 +108,10 @@
                   "bool": false
                 },
                 {
-                  "bytes": "d4a6f4b33b97e231e0494c342c7dce2593fac6dd900e4a60bedf069fc7ed3e0c6d69aef3ce9437192e9afce5b2ea0e1f44bbefe649140897efe6f7f6601ebf0e"
+                  "u32": 0
+                },
+                {
+                  "bytes": "a442dd10f96e7e2818a026c82541ce5e4a7cbd7f8d72733a9b69b0f59ef99a48f647bd38cc0b19be0ff994587ae27d37ffff6e6f26d9437db67bcae15049e206"
                 }
               ]
             }
@@ -139,10 +160,30 @@
           "data": {
             "contract_data": {
               "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "5541220902715666415"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "1033654523790656264"
                 }
               },
               "durability": "temporary",
@@ -190,6 +231,33 @@
               "key": {
                 "vec": [
                   {
+                    "symbol": "CollectionCount"
+                  },
+                  {
+                    "u32": 0
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u32": 1
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
+              "key": {
+                "vec": [
+                  {
                     "symbol": "Token"
                   },
                   {
@@ -206,6 +274,14 @@
                     },
                     "val": {
                       "u32": 42
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "collection_id"
+                    },
+                    "val": {
+                      "u32": 0
                     }
                   },
                   {
@@ -376,7 +452,7 @@
                         ]
                       },
                       "val": {
-                        "bytes": "a1806f65475d5018949a53b1dc5b9abda878a30fc5c18fdbdf527577eb24b905"
+                        "bytes": "4694f9c7e851e4138d0eb605730b66346d456f5122fb46588251e56b844990a9"
                       }
                     }
                   ]
