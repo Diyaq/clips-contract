@@ -179,6 +179,8 @@ pub enum DataKey {
     LastMintNonce(Address),
     /// Task 1: used signature hashes for replay protection
     UsedSignature(BytesN<32>),
+    /// Issue #299: optional human-readable reason provided when pausing
+    PauseReason,
 }
 
 // =============================================================================
@@ -256,6 +258,10 @@ pub struct SignerUpdatedEvent { pub new_pubkey: BytesN<32> }
 // Emitted when pause is scheduled and becomes active.
 #[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PauseScheduledEvent { pub active_at: u64 }
+
+// Emitted when pause is scheduled with an optional admin-provided reason.
+#[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseWithReasonEvent { pub active_at: u64, pub reason: Option<String> }
 
 // Emitted when the contract is unpaused.
 #[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
@@ -723,19 +729,36 @@ impl ClipsNftContract {
     // Pause / Admin
     // -------------------------------------------------------------------------
 
-    pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
+    /// Pause the contract with an optional human-readable reason.
+    ///
+    /// The pause takes effect after a 24-hour timelock. Callers can query the
+    /// stored reason via [`pause_reason`] until the contract is unpaused.
+    pub fn pause(env: Env, admin: Address, reason: Option<String>) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         let active_at = env.ledger().timestamp().saturating_add(86_400);
         env.storage().instance().set(&DataKey::PauseUnlockTime, &active_at);
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish((symbol_short!("pse_sched"), symbol_short!("pause")), PauseScheduledEvent { active_at });
+        match reason.clone() {
+            Some(ref r) => env.storage().instance().set(&DataKey::PauseReason, r),
+            None => env.storage().instance().remove(&DataKey::PauseReason),
+        }
+        env.events().publish(
+            (symbol_short!("pse_sched"), symbol_short!("pause")),
+            PauseWithReasonEvent { active_at, reason },
+        );
         Ok(())
+    }
+
+    /// Returns the reason stored when the contract was last paused, if any.
+    pub fn pause_reason(env: Env) -> Option<String> {
+        env.storage().instance().get(&DataKey::PauseReason)
     }
 
     pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().remove(&DataKey::PauseUnlockTime);
+        env.storage().instance().remove(&DataKey::PauseReason);
         env.events().publish((symbol_short!("unpaused"), admin.clone()), UnpausedEvent {});
         Ok(())
     }
@@ -4365,7 +4388,7 @@ mod tests {
         let client = ClipsNftContractClient::new(&env, &cid);
         client.init(&admin);
         let sk = register_signer(&env, &client, &admin);
-        client.pause(&admin);
+        client.pause(&admin, &None);
         env.ledger().with_mut(|l| l.timestamp += 86_401);
         let uri = String::from_str(&env, "ipfs://QmPaused");
         let sig = sign_mint(&env, &sk, &user1, 500, &uri);
