@@ -324,7 +324,7 @@ fn test_error_cases() {
 
     // Case 4: Transfer while paused (after 24h timelock elapses)
     let token_id = 1;
-    client.pause(&admin);
+    client.pause(&admin, &None);
     env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
     let result = client.try_transfer(&user, &malicious, &token_id, &0, &None);
     assert!(result.is_err());

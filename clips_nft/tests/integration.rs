@@ -133,7 +133,7 @@ fn test_integration_wallet_simulation_mint_and_royalty() {
     assert_eq!(client.owner_of(&token_id), new_owner);
 
     // 8. Test "Is Paused" flow (24h timelock before pause is active)
-    client.pause(&admin);
+    client.pause(&admin, &None);
     assert!(!client.is_paused());
 
     env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
@@ -304,7 +304,7 @@ fn test_pause_timelock_mint_still_works_before_24h() {
     client.set_signer(&admin, &pubkey);
 
     // Schedule pause
-    client.pause(&admin);
+    client.pause(&admin, &None);
 
     // Advance time by 23 hours — still within the 24-hour window
     env.ledger().with_mut(|l| l.timestamp += 23 * 3600);
@@ -346,7 +346,7 @@ fn test_pause_timelock_blocks_mint_after_24h() {
     let pubkey = BytesN::from_array(&env, &kp.verifying_key().to_bytes());
     client.set_signer(&admin, &pubkey);
 
-    client.pause(&admin);
+    client.pause(&admin, &None);
     env.ledger().with_mut(|l| l.timestamp += 86_400 + 1);
 
     let clip_id = 8002u32;
@@ -434,7 +434,7 @@ fn test_claim_royalties_unauthorized_caller_fails() {
     client.set_signer(&admin, &pubkey);
 
     // Schedule pause then immediately cancel
-    client.pause(&admin);
+    client.pause(&admin, &None);
     client.unpause(&admin);
 
     // Advance past the original 24h window
@@ -467,7 +467,7 @@ fn test_is_paused_false_before_timelock_elapses() {
     let client = ClipsNftContractClient::new(&env, &contract_id);
     client.init(&admin);
 
-    client.pause(&admin);
+    client.pause(&admin, &None);
 
     // Before 24h — is_paused should return false
     assert!(!client.is_paused());

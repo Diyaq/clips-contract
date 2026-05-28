@@ -119,14 +119,21 @@ message    = SHA-256( clip_id_le_4_bytes || owner_hash || uri_hash )
 - **Requires**: primary recipient (index 0)
 - **Purpose**: claims accumulated royalties stored per token
 
-#### `pause(admin: Address) -> Result<(), Error>`
+#### `pause(admin: Address, reason: Option<String>) -> Result<(), Error>`
 
 - **Requires**: admin
-- **Effect**: sets paused flag and schedules a 24-hour timelock
+- **Effect**: sets paused flag, schedules a 24-hour timelock, and stores an optional human-readable reason
+- **Query reason**: `pause_reason()` returns the stored reason (cleared on `unpause`)
+
+#### `pause_reason() -> Option<String>`
+
+- **Type**: view
+- **Returns**: the reason string set during the last `pause` call, or `None`
 
 #### `unpause(admin: Address) -> Result<(), Error>`
 
 - **Requires**: admin
+- **Effect**: clears the paused flag and removes the stored reason
 
 ### Events (high-level)
 
