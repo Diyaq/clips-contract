@@ -850,6 +850,26 @@ impl ClipsNftContract {
         env.storage().instance().get(&DataKey::BackendAddress)
     }
 
+    pub fn name(env: Env) -> String {
+        env.storage().instance().get(&DataKey::Name).unwrap_or_else(|| String::from_str(&env, "ClipCash Clips"))
+    }
+
+    pub fn symbol(env: Env) -> String {
+        env.storage().instance().get(&DataKey::Symbol).unwrap_or_else(|| String::from_str(&env, "CLIP"))
+    }
+
+    pub fn set_name(env: Env, admin: Address, name: String) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Name, &name);
+        Ok(())
+    }
+
+    pub fn set_symbol(env: Env, admin: Address, symbol: String) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Symbol, &symbol);
+        Ok(())
+    }
+
     pub fn set_platform_recipient(env: Env, admin: Address, recipient: Address) -> Result<(), Error> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::PlatformRecipient, &recipient);
@@ -1224,6 +1244,26 @@ impl ClipsNftContract {
         env.storage().instance().set(&DataKey::LastWithdrawalTime, &env.ledger().timestamp());
         soroban_sdk::token::TokenClient::new(&env, &asset).transfer(&env.current_contract_address(), &admin, &amount);
         env.events().publish((symbol_short!("wdraw_exe"), admin.clone()), WithdrawExecutedEvent { amount, recipient: admin });
+        Ok(())
+    }
+
+    pub fn withdraw_xlm(env: Env, admin: Address, xlm_address: Address, amount: i128) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if let Some(req) = env.storage().instance().get::<_, WithdrawRequest>(&DataKey::WithdrawXlmRequest) {
+            if req.amount == amount {
+                if env.ledger().timestamp() < req.unlock_time {
+                    return Err(Error::WithdrawalStillLocked);
+                }
+                env.storage().instance().remove(&DataKey::WithdrawXlmRequest);
+                env.storage().instance().set(&DataKey::LastWithdrawalTime, &env.ledger().timestamp());
+                soroban_sdk::token::TokenClient::new(&env, &xlm_address).transfer(&env.current_contract_address(), &admin, &amount);
+                env.events().publish((symbol_short!("wdraw_xlm"), admin.clone()), WithdrawExecutedEvent { amount, recipient: admin });
+                return Ok(());
+            }
+        }
+        let unlock_time = env.ledger().timestamp().saturating_add(86_400);
+        env.storage().instance().set(&DataKey::WithdrawXlmRequest, &WithdrawRequest { amount, unlock_time });
+        env.events().publish((symbol_short!("wreq_xlm"), admin.clone()), WithdrawRequestedEvent { amount, unlock_time });
         Ok(())
     }
 

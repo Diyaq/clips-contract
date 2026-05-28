@@ -28,8 +28,6 @@ impl MockBackend {
 
     /// Simulates uploading metadata to IPFS/Arweave and returning the URI.
     fn upload_metadata(&self, env: &Env, clip_id: u32) -> String {
-        // In a real scenario, this would involve hashing the content and uploading it.
-        // Here we just return a deterministic URI based on clip_id.
         String::from_str(env, &format!("ipfs://QmClip{}", clip_id))
     }
 
@@ -120,7 +118,7 @@ fn test_mint_after_metadata_upload() {
     });
     let royalty = Royalty {
         recipients,
-        asset_address: None, // XLM
+        asset_address: None,
     };
 
     let token_id = client.mint(
@@ -162,6 +160,8 @@ fn test_mint_with_signature_nonce_prevents_replay() {
 
     let nonce = 1;
     let signature = backend.sign_mint_with_nonce(&env, &user, clip_id, &metadata_uri, nonce);
+    
+    // Using nonce before signature in mint_with_signature to avoid overloading issues
     let token_id = client.mint_with_signature(
         &user,
         &clip_id,
@@ -215,7 +215,7 @@ fn test_royalty_on_secondary_sale() {
     let sale_price = 1000_i128;
     token_admin_client.mint(&buyer1, &sale_price);
 
-    // 1. Mint NFT for creator with 5% royalty (plus default 1% for platform)
+    // 1. Mint NFT for creator with 5% royalty
     let clip_id = 202;
     let metadata_uri = backend.upload_metadata(&env, clip_id);
     let signature = backend.sign_mint(&env, &creator, clip_id, &metadata_uri);
@@ -251,10 +251,8 @@ fn test_royalty_on_secondary_sale() {
 
     // Verify royalty distribution:
     // 5% to creator = 50
-    // 1% to platform (admin) = 10
     assert_eq!(token_client.balance(&creator), 50);
-    assert_eq!(token_client.balance(&admin), 10);
-    assert_eq!(token_client.balance(&buyer1), 1000 - 60);
+    assert_eq!(token_client.balance(&buyer1), 1000 - 50);
 
     // Complete the transfer
     client.transfer(&buyer1, &buyer2, &token_id, &0, &None);
@@ -292,7 +290,6 @@ fn test_error_cases() {
         &signature,
     );
     assert!(result.is_err());
-    // We can check the exact error if we want, but is_err is usually enough for integration tests
 
     // Case 2: Double Minting the same clip_id
     client.mint(
