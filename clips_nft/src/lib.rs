@@ -406,6 +406,84 @@ impl ClipsNftContract {
         env.storage().instance().get(&DataKey::PendingOwner)
     }
 
+    fn emit_mint_event(
+        env: &Env,
+        token_id: TokenId,
+        from: &Address,
+        to: &Address,
+        clip_id: u32,
+    ) {
+        env.events().publish(
+            (symbol_short!("mint"), token_id, from.clone(), to.clone()),
+            MintEvent {
+                to: to.clone(),
+                clip_id,
+                token_id,
+            },
+        );
+    }
+
+    fn emit_transfer_event(env: &Env, token_id: TokenId, from: &Address, to: &Address) {
+        env.events().publish(
+            (symbol_short!("transfer"), token_id, from.clone(), to.clone()),
+            TransferEvent {
+                token_id,
+                from: from.clone(),
+                to: to.clone(),
+            },
+        );
+    }
+
+    fn emit_royalty_paid_event(
+        env: &Env,
+        token_id: TokenId,
+        from: &Address,
+        to: &Address,
+        amount: i128,
+    ) {
+        env.events().publish(
+            (
+                symbol_short!("royalty"),
+                token_id,
+                from.clone(),
+                to.clone(),
+                amount,
+            ),
+            RoyaltyPaidEvent {
+                token_id,
+                from: from.clone(),
+                to: to.clone(),
+                amount,
+            },
+        );
+    }
+
+    fn require_clip_owner(owner: &Address) {
+        owner.require_auth();
+    }
+
+    fn only_clip_owner(
+        env: &Env,
+        owner: &Address,
+        clip_id: u32,
+        metadata_uri: &String,
+        signature: &BytesN<64>,
+    ) -> Result<(), Error> {
+        Self::verify_clip_signature(env, owner, clip_id, metadata_uri, signature)
+    }
+
+    fn only_clip_owner_with_nonce(
+        env: &Env,
+        owner: &Address,
+        clip_id: u32,
+        metadata_uri: &String,
+        nonce: u64,
+        signature: &BytesN<64>,
+    ) -> Result<(), Error> {
+        Self::verify_clip_signature_with_nonce(env, owner, clip_id, metadata_uri, nonce, signature)?;
+        Ok(())
+    }
+
     // -------------------------------------------------------------------------
     // Task 1: Safe math — mint with overflow-safe royalty validation
     // -------------------------------------------------------------------------
@@ -421,7 +499,7 @@ impl ClipsNftContract {
         is_soulbound: bool,
         signature: BytesN<64>,
     ) -> Result<TokenId, Error> {
-        to.require_auth();
+        Self::require_clip_owner(&to);
         Self::require_not_paused(&env)?;
         if env.storage().instance().get::<DataKey, bool>(&DataKey::MintingPaused).unwrap_or(false) {
             return Err(Error::MintingPaused);
@@ -430,7 +508,7 @@ impl ClipsNftContract {
         Self::check_circuit_breaker(&env, 1)?;
         Self::validate_url(&env, &image)?;
         Self::validate_url(&env, &animation_url)?;
-        Self::verify_clip_signature(&env, &to, clip_id, &metadata_uri, &signature)?;
+        Self::only_clip_owner(&env, &to, clip_id, &metadata_uri, &signature)?;
 
         if Self::is_clip_minted(&env, clip_id) {
             return Err(Error::ClipAlreadyMinted);
@@ -479,7 +557,9 @@ impl ClipsNftContract {
         let gas: u64 = env.storage().temporary().get(&DataKey::TotalGasMint).unwrap_or(0);
         env.storage().temporary().set(&DataKey::TotalGasMint, &gas.saturating_add(GAS_BASE_MINT));
 
-        env.events().publish((symbol_short!("mint"), token_id, to.clone()), MintEvent { to, clip_id, token_id });
+        let mint_from = env.current_contract_address();
+        Self::emit_mint_event(&env, token_id, &mint_from, &to, clip_id);
+        Self::emit_transfer_event(&env, token_id, &mint_from, &to);
         Ok(token_id)
     }
 
@@ -519,7 +599,13 @@ impl ClipsNftContract {
                 cum_amt = total;
                 if amount > 0 {
                     token_client.transfer(&to, &split.recipient, &amount);
-                    env.events().publish((symbol_short!("royalty"), token_id, split.recipient.clone()), RoyaltyPaidEvent { token_id, from: to.clone(), to: split.recipient, amount });
+                    Self::emit_royalty_paid_event(
+                        &env,
+                        token_id,
+                        &to,
+                        &split.recipient,
+                        amount,
+                    );
                 }
             }
             Self::release_reentrancy_lock(&env);
@@ -542,7 +628,7 @@ impl ClipsNftContract {
         let gt: u64 = env.storage().temporary().get(&DataKey::TotalGasTransfer).unwrap_or(0);
         env.storage().temporary().set(&DataKey::TotalGasTransfer, &gt.saturating_add(GAS_BASE_TRANSFER));
 
-        env.events().publish((symbol_short!("transfer"), token_id, from.clone(), to.clone()), TransferEvent { token_id, from, to });
+        Self::emit_transfer_event(&env, token_id, &from, &to);
         Ok(())
     }
 
@@ -738,7 +824,13 @@ impl ClipsNftContract {
             cum_amt = total;
             if amount > 0 {
                 client.transfer(&payer, &split.recipient, &amount);
-                env.events().publish((symbol_short!("royalty"), token_id, split.recipient.clone()), RoyaltyPaidEvent { token_id, from: payer.clone(), to: split.recipient, amount });
+                Self::emit_royalty_paid_event(
+                    &env,
+                    token_id,
+                    &payer,
+                    &split.recipient,
+                    amount,
+                );
             }
         }
         Self::release_reentrancy_lock(&env);
@@ -945,7 +1037,7 @@ impl ClipsNftContract {
 
     /// Mint using a backend-provided signature instead of a wallet-signed tx.
     ///
-    /// This entrypoint does NOT require the recipient to `require_auth()`.
+    /// This entrypoint still requires the recipient to authorize the mint.
     /// The backend signature must include a nonce to prevent replay attacks.
     pub fn mint_with_signature(
         env: Env,
@@ -957,6 +1049,7 @@ impl ClipsNftContract {
         royalty: Royalty,
         is_soulbound: bool,
     ) -> Result<TokenId, Error> {
+        Self::require_clip_owner(&to);
         Self::mint_core(
             &env,
             &to,
@@ -1029,16 +1122,9 @@ impl ClipsNftContract {
         let balance: u32 = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + 1));
 
-        env.events().publish((symbol_short!("mint"), token_id, to.clone()), MintEvent { to: to.clone(), clip_id, token_id });
-
-        env.events().publish(
-            (symbol_short!("transfer"), token_id, env.current_contract_address(), to.clone()),
-            TransferEvent {
-                token_id,
-                from: env.current_contract_address(),
-                to: to.clone(),
-            },
-        );
+        let mint_from = env.current_contract_address();
+        Self::emit_mint_event(env, token_id, &mint_from, to, clip_id);
+        Self::emit_transfer_event(env, token_id, &mint_from, to);
 
         let count_mint: u64 = env.storage().instance().get(&DataKey::CountMint).unwrap_or(0);
         env.storage().instance().set(&DataKey::CountMint, &(count_mint + 1));
@@ -1075,7 +1161,7 @@ impl ClipsNftContract {
         nonce: u64,
         signature: BytesN<64>,
     ) -> Result<TokenId, Error> {
-        to.require_auth();
+        Self::require_clip_owner(&to);
         Self::require_not_paused(&env)?;
         Self::enforce_mint_cooldown(&env, &to)?;
         Self::check_circuit_breaker(&env, 1)?;
@@ -1083,7 +1169,7 @@ impl ClipsNftContract {
         Self::validate_url(&env, &image, Error::InvalidImageUrl)?;
         Self::validate_url(&env, &animation_url, Error::InvalidAnimationUrl)?;
 
-        Self::verify_clip_signature_with_nonce(&env, &to, clip_id, &metadata_uri, nonce, &signature)?;
+        Self::only_clip_owner_with_nonce(&env, &to, clip_id, &metadata_uri, nonce, &signature)?;
         Self::ensure_mint_nonce(&env, &to, nonce)?;
 
         let token_id = Self::mint_core(
@@ -1201,7 +1287,7 @@ impl ClipsNftContract {
         is_soulbound: bool,
         signatures: Vec<BytesN<64>>,
     ) -> Result<Vec<TokenId>, Error> {
-        to.require_auth();
+        Self::require_clip_owner(&to);
         Self::require_not_paused(&env)?;
         Self::enforce_mint_cooldown(&env, &to)?;
         let n = clip_ids.len();
@@ -1220,7 +1306,7 @@ impl ClipsNftContract {
             let signature = signatures.get(i).ok_or(Error::InvalidTokenId)?;
             Self::validate_url(&env, &image)?;
             Self::validate_url(&env, &animation_url)?;
-            Self::verify_clip_signature(&env, &to, clip_id, &metadata_uri, &signature)?;
+            Self::only_clip_owner(&env, &to, clip_id, &metadata_uri, &signature)?;
             if Self::is_clip_minted(&env, clip_id) { return Err(Error::ClipAlreadyMinted); }
             if env.storage().persistent().get::<DataKey, bool>(&DataKey::BlacklistedClip(clip_id)).unwrap_or(false) { return Err(Error::ClipBlacklisted); }
             let token_id: TokenId = env.storage().instance().get(&DataKey::NextTokenId).unwrap_or(1);
@@ -1237,6 +1323,9 @@ impl ClipsNftContract {
             let bal: u32 = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
             env.storage().persistent().set(&DataKey::Balance(to.clone()), &(bal + 1));
             env.storage().persistent().set(&DataKey::OwnerTokenIndex(to.clone(), bal), &token_id);
+            let mint_from = env.current_contract_address();
+            Self::emit_mint_event(&env, token_id, &mint_from, &to, clip_id);
+            Self::emit_transfer_event(&env, token_id, &mint_from, &to);
             minted.push_back(token_id);
         }
         Self::record_mint_timestamp(&env, &to);
@@ -1715,15 +1804,7 @@ impl ClipsNftContract {
             }
 
             token_client.transfer(payer, &split.recipient, &amount);
-            env.events().publish(
-                (symbol_short!("royalty"),),
-                RoyaltyPaidEvent {
-                    token_id,
-                    from: payer.clone(),
-                    to: split.recipient,
-                    amount,
-                },
-            );
+            Self::emit_royalty_paid_event(env, token_id, payer, &split.recipient, amount);
         }
 
         Ok(())
@@ -1919,14 +2000,8 @@ impl ClipsNftContract {
         );
 
         // Emit standard Transfer event for ERC-721 compliance
-        env.events().publish(
-            (symbol_short!("transfer"),),
-            TransferEvent {
-                token_id,
-                from: owner.clone(),
-                to: env.current_contract_address(),
-            },
-        );
+        let burn_to = env.current_contract_address();
+        Self::emit_transfer_event(&env, token_id, &owner, &burn_to);
 
         Ok(())
     }
@@ -2003,14 +2078,8 @@ impl ClipsNftContract {
             );
 
             // Emit standard Transfer event for ERC-721 compliance (to zero address)
-            env.events().publish(
-                (symbol_short!("transfer"),),
-                TransferEvent {
-                    token_id,
-                    from: owner.clone(),
-                    to: env.current_contract_address(),
-                },
-            );
+            let burn_to = env.current_contract_address();
+            Self::emit_transfer_event(&env, token_id, &owner, &burn_to);
         }
 
         Ok(())
