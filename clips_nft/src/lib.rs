@@ -927,6 +927,29 @@ impl ClipsNftContract {
     ///
     /// This entrypoint does NOT require the recipient to `require_auth()`.
     /// The backend signature must include a nonce to prevent replay attacks.
+    pub fn mint_with_signature(
+        env: Env,
+        to: Address,
+        clip_id: u32,
+        metadata_uri: String,
+        image: Option<String>,
+        animation_url: Option<String>,
+        royalty: Royalty,
+        is_soulbound: bool,
+    ) -> Result<TokenId, Error> {
+        Self::mint_core(
+            &env,
+            &to,
+            clip_id,
+            metadata_uri,
+            image,
+            animation_url,
+            royalty,
+            is_soulbound,
+        )
+    }
+
+    /// Internal mint implementation shared by public mint entrypoints.
     fn mint_core(
         env: &Env,
         to: &Address,
