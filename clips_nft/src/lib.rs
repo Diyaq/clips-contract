@@ -161,6 +161,7 @@ pub enum DataKey {
     CountTransfer,
     Token(TokenId),
     ClipIdMinted(u32),
+    MintedClip(u32),
     CustomTokenUri(TokenId),
     Approved(TokenId),
     MetadataUpdateCount(TokenId),
@@ -189,7 +190,7 @@ pub enum DataKey {
 
 // Emitted on mint completion and useful for frontend tokens/indexing.
 #[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MintEvent { pub to: Address, pub clip_id: u32, pub token_id: TokenId, pub metadata_uri: String }
+pub struct MintEvent { pub to: Address, pub clip_id: u32, pub token_id: TokenId }
 
 // Emitted when a token is destroyed.
 #[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
@@ -229,7 +230,7 @@ pub struct TokenUriChangedEvent { pub token_id: TokenId, pub owner: Address, pub
 
 // Emitted when metadata fields are refreshed by admin or backend.
 #[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MetadataUpdatedEvent { pub token_id: TokenId, pub old_uri: String, pub new_uri: String }
+pub struct MetadataUpdatedEvent { pub token_id: TokenId }
 
 // Emitted when metadata is permanently locked.
 #[contracttype] #[derive(Clone, Debug, Eq, PartialEq)]
@@ -431,7 +432,7 @@ impl ClipsNftContract {
         Self::validate_url(&env, &animation_url)?;
         Self::verify_clip_signature(&env, &to, clip_id, &metadata_uri, &signature)?;
 
-        if Self::load_clip_token_id(&env, clip_id).is_some() {
+        if Self::is_clip_minted(&env, clip_id) {
             return Err(Error::ClipAlreadyMinted);
         }
         if env.storage().persistent().get::<DataKey, bool>(&DataKey::BlacklistedClip(clip_id)).unwrap_or(false) {
@@ -460,8 +461,7 @@ impl ClipsNftContract {
         };
         env.storage().persistent().set(&DataKey::Token(token_id), &data);
         Self::bump_persistent_ttl(&env, &DataKey::Token(token_id));
-        env.storage().persistent().set(&DataKey::ClipIdMinted(clip_id), &token_id);
-        Self::bump_persistent_ttl(&env, &DataKey::ClipIdMinted(clip_id));
+        Self::mark_clip_minted(&env, clip_id, token_id);
 
         // Update supply + enumeration indexes
         let supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
@@ -479,7 +479,7 @@ impl ClipsNftContract {
         let gas: u64 = env.storage().temporary().get(&DataKey::TotalGasMint).unwrap_or(0);
         env.storage().temporary().set(&DataKey::TotalGasMint, &gas.saturating_add(GAS_BASE_MINT));
 
-        env.events().publish((symbol_short!("mint"), token_id, to.clone()), MintEvent { to, clip_id, token_id, metadata_uri });
+        env.events().publish((symbol_short!("mint"), token_id, to.clone()), MintEvent { to, clip_id, token_id });
         Ok(token_id)
     }
 
@@ -956,124 +956,20 @@ impl ClipsNftContract {
         animation_url: Option<String>,
         royalty: Royalty,
         is_soulbound: bool,
-        signature: BytesN<64>,
-        nonce: u64,
     ) -> Result<TokenId, Error> {
-        // No `to.require_auth()` — caller may be any relayer.
-        Self::require_not_paused(&env)?;
-        Self::check_circuit_breaker(&env, 1)?;
-
-        // Validate URLs before state changes.
-        Self::validate_url(&env, &image, Error::InvalidImageUrl)?;
-        Self::validate_url(&env, &animation_url, Error::InvalidAnimationUrl)?;
-
-        // Verify backend signature and obtain message hash.
-        let message_hash = Self::verify_clip_signature_with_nonce(&env, &to, clip_id, &metadata_uri, nonce, &signature)?;
-
-        // Dedup check — one persistent read.
-        if Self::load_clip_token_id(&env, clip_id).is_some() {
-            return Err(Error::ClipAlreadyMinted);
-        }
-
-        if env
-            .storage()
-            .persistent()
-            .get(&DataKey::BlacklistedClip(clip_id))
-            .unwrap_or(false)
-        {
-            return Err(Error::ClipBlacklisted);
-        }
-
-        let royalty = Self::normalize_royalty(&env, royalty)?;
-
-        let token_id: TokenId = env
-            .storage()
-            .instance()
-            .get(&DataKey::NextTokenId)
-            .unwrap_or(1);
-
-        // 4 persistent writes
-        env.storage().persistent().set(
-            &DataKey::Token(token_id),
-            &TokenData {
-                owner: to.clone(),
-                clip_id,
-                is_soulbound,
-                metadata_uri: metadata_uri.clone(),
-                image: image.clone(),
-                animation_url: animation_url.clone(),
-                description: None,
-                external_url: None,
-                attributes: Vec::new(&env),
-                royalty,
-            },
-        );
-        Self::bump_persistent_ttl(&env, &DataKey::Token(token_id));
-        env.storage()
-            .persistent()
-            .set(&DataKey::ClipIdMinted(clip_id), &token_id);
-        Self::bump_persistent_ttl(&env, &DataKey::ClipIdMinted(clip_id));
-
-        // 1 instance write.
-        env.storage()
-            .instance()
-            .set(&DataKey::NextTokenId, &(token_id + 1));
-
-        // Update total supply
-        let total_supply: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalSupply)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalSupply, &(total_supply + 1));
-
-        // Update balance
-        let balance: u32 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Balance(to.clone()))
-            .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Balance(to.clone()), &(balance + 1));
-
-        // Mark signature message hash as used to prevent replay.
-        Self::mark_signature_used(&env, &message_hash);
-
-        env.events().publish(
-            (symbol_short!("mint"), token_id, to.clone()),
-            MintEvent {
-                to: to.clone(),
-                clip_id,
-                token_id,
-                metadata_uri,
-            },
-        );
-
-        env.events().publish(
-            (symbol_short!("transfer"), token_id, env.current_contract_address(), to.clone()),
-            TransferEvent {
-                token_id,
-                from: env.current_contract_address(),
-                to: to.clone(),
-            },
-        );
-
-        // Gas tracking
-        let count_mint: u64 = env.storage().instance().get(&DataKey::CountMint).unwrap_or(0);
-        env.storage().instance().set(&DataKey::CountMint, &(count_mint + 1));
-        let total_gas_mint: u64 = env.storage().instance().get(&DataKey::TotalGasMint).unwrap_or(0);
-        env.storage().instance().set(&DataKey::TotalGasMint, &total_gas_mint.saturating_add(GAS_BASE_MINT));
-        Self::record_mint_timestamp(&env, &to);
-
-        // Update circuit breaker
-        Self::update_circuit_breaker_counter(&env, 1);
-
-        Ok(token_id)
+        Self::mint_core(
+            &env,
+            &to,
+            clip_id,
+            metadata_uri,
+            image,
+            animation_url,
+            royalty,
+            is_soulbound,
+        )
     }
 
+    /// Internal mint implementation shared by public mint entrypoints.
     fn mint_core(
         env: &Env,
         to: &Address,
@@ -1084,7 +980,7 @@ impl ClipsNftContract {
         royalty: Royalty,
         is_soulbound: bool,
     ) -> Result<TokenId, Error> {
-        if Self::load_clip_token_id(env, clip_id).is_some() {
+        if Self::is_clip_minted(env, clip_id) {
             return Err(Error::ClipAlreadyMinted);
         }
 
@@ -1121,10 +1017,7 @@ impl ClipsNftContract {
             },
         );
         Self::bump_persistent_ttl(env, &DataKey::Token(token_id));
-        env.storage()
-            .persistent()
-            .set(&DataKey::ClipIdMinted(clip_id), &token_id);
-        Self::bump_persistent_ttl(env, &DataKey::ClipIdMinted(clip_id));
+        Self::mark_clip_minted(env, clip_id, token_id);
 
         env.storage()
             .instance()
@@ -1136,10 +1029,7 @@ impl ClipsNftContract {
         let balance: u32 = env.storage().persistent().get(&DataKey::Balance(to.clone())).unwrap_or(0);
         env.storage().persistent().set(&DataKey::Balance(to.clone()), &(balance + 1));
 
-        env.events().publish(
-            (symbol_short!("mint"), token_id, to.clone()),
-            MintEvent { to: to.clone(), clip_id, token_id, metadata_uri: metadata_uri.clone() },
-        );
+        env.events().publish((symbol_short!("mint"), token_id, to.clone()), MintEvent { to: to.clone(), clip_id, token_id });
 
         env.events().publish(
             (symbol_short!("transfer"), token_id, env.current_contract_address(), to.clone()),
@@ -1331,7 +1221,7 @@ impl ClipsNftContract {
             Self::validate_url(&env, &image)?;
             Self::validate_url(&env, &animation_url)?;
             Self::verify_clip_signature(&env, &to, clip_id, &metadata_uri, &signature)?;
-            if Self::load_clip_token_id(&env, clip_id).is_some() { return Err(Error::ClipAlreadyMinted); }
+            if Self::is_clip_minted(&env, clip_id) { return Err(Error::ClipAlreadyMinted); }
             if env.storage().persistent().get::<DataKey, bool>(&DataKey::BlacklistedClip(clip_id)).unwrap_or(false) { return Err(Error::ClipBlacklisted); }
             let token_id: TokenId = env.storage().instance().get(&DataKey::NextTokenId).unwrap_or(1);
             env.storage().instance().set(&DataKey::NextTokenId, &(token_id + 1));
@@ -1340,8 +1230,7 @@ impl ClipsNftContract {
                 description: None, external_url: None, attributes: Vec::new(&env), royalty: royalty.clone(), is_locked: false,
             });
             Self::bump_persistent_ttl(&env, &DataKey::Token(token_id));
-            env.storage().persistent().set(&DataKey::ClipIdMinted(clip_id), &token_id);
-            Self::bump_persistent_ttl(&env, &DataKey::ClipIdMinted(clip_id));
+            Self::mark_clip_minted(&env, clip_id, token_id);
             let supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
             env.storage().instance().set(&DataKey::TotalSupply, &(supply + 1));
             env.storage().persistent().set(&DataKey::TokenIndex(supply), &token_id);
@@ -2356,7 +2245,7 @@ impl ClipsNftContract {
 
             Self::verify_clip_signature(&env, &to, clip_id, &metadata_uri, &signature)?;
 
-            if Self::load_clip_token_id(&env, clip_id).is_some() {
+            if Self::is_clip_minted(&env, clip_id) {
                 return Err(Error::ClipAlreadyMinted);
             }
 
@@ -2392,10 +2281,7 @@ impl ClipsNftContract {
                 },
             );
             Self::bump_persistent_ttl(&env, &DataKey::Token(token_id));
-            env.storage()
-                .persistent()
-                .set(&DataKey::ClipIdMinted(clip_id), &token_id);
-            Self::bump_persistent_ttl(&env, &DataKey::ClipIdMinted(clip_id));
+            Self::mark_clip_minted(&env, clip_id, token_id);
             env.storage()
                 .instance()
                 .set(&DataKey::NextTokenId, &(token_id + 1));
@@ -2646,6 +2532,27 @@ impl ClipsNftContract {
             Self::bump_persistent_ttl(env, &key);
         }
         token_id
+    }
+
+    /// Returns `true` if `clip_id` has ever been minted, even if the token was later burned.
+    fn is_clip_minted(env: &Env, clip_id: u32) -> bool {
+        env.storage()
+            .persistent()
+            .get::<DataKey, bool>(&DataKey::MintedClip(clip_id))
+            .unwrap_or(false)
+            || Self::load_clip_token_id(env, clip_id).is_some()
+    }
+
+    /// Records both the active token lookup and the ever-minted marker for a clip ID.
+    fn mark_clip_minted(env: &Env, clip_id: u32, token_id: TokenId) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::ClipIdMinted(clip_id), &token_id);
+        Self::bump_persistent_ttl(env, &DataKey::ClipIdMinted(clip_id));
+        env.storage()
+            .persistent()
+            .set(&DataKey::MintedClip(clip_id), &true);
+        Self::bump_persistent_ttl(env, &DataKey::MintedClip(clip_id));
     }
 
     /// Extends persistent entry TTL to reduce archive risk on hot keys.
@@ -3851,13 +3758,28 @@ mod tests {
         }
         let mut data = Self::load_token(&env, token_id)?;
         if data.is_locked { return Err(Error::MetadataLocked); }
-        let old_uri = data.metadata_uri.clone();
         if let Some(uri) = new_uri { data.metadata_uri = uri; }
         if let Some(img) = image { data.image = if img.is_empty() { None } else { Some(img) }; }
         if let Some(anim) = animation_url { data.animation_url = if anim.is_empty() { None } else { Some(anim) }; }
         env.storage().persistent().set(&DataKey::Token(token_id), &data);
         env.storage().persistent().set(&DataKey::MetadataRefreshTime(token_id), &now);
-        env.events().publish((symbol_short!("meta_upd"), token_id), MetadataUpdatedEvent { token_id, old_uri, new_uri: data.metadata_uri });
+        env.events().publish((symbol_short!("meta_upd"), token_id), MetadataUpdatedEvent { token_id });
+        Ok(())
+    }
+
+    /// Update the custom attribute list stored for a token.
+    ///
+    /// The caller must be the admin or registered backend address and the token must not be locked.
+    pub fn update_attributes(env: Env, caller: Address, token_id: TokenId, attributes: Vec<Attribute>) -> Result<(), Error> {
+        caller.require_auth();
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).expect("not init");
+        let is_backend = env.storage().instance().get::<DataKey, Address>(&DataKey::BackendAddress).map(|b| caller == b).unwrap_or(false);
+        if caller != admin && !is_backend { return Err(Error::Unauthorized); }
+        let mut data = Self::load_token(&env, token_id)?;
+        if data.is_locked { return Err(Error::MetadataLocked); }
+        data.attributes = attributes;
+        env.storage().persistent().set(&DataKey::Token(token_id), &data);
+        env.events().publish((symbol_short!("meta_upd"), token_id), MetadataUpdatedEvent { token_id });
         Ok(())
     }
 
@@ -4161,15 +4083,14 @@ mod tests {
         let from_version: u32 = env.storage().instance().get(&DataKey::ContractVersion)
             .unwrap_or(1);
 
-        // Validate: if we're at VERSION, no migration needed
-        if from_version >= VERSION {
-            return Ok(());
-        }
-
-        // Migration v1 -> v2 (example structure for future versions)
-        if from_version == 1 {
-            // Any v1 -> v2 transformations would go here
-            // For now, no data changes required
+        // Rebuild the ever-minted set from active token indexes so burned clips remain blocked.
+        let total_supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+        for pos in 0..total_supply {
+            if let Some(token_id) = env.storage().persistent().get::<DataKey, TokenId>(&DataKey::TokenIndex(pos)) {
+                if let Ok(data) = Self::load_token(&env, token_id) {
+                    Self::mark_clip_minted(&env, data.clip_id, token_id);
+                }
+            }
         }
 
         // Bump the version

@@ -11,7 +11,7 @@ use soroban_sdk::{
 mod test_helpers;
 use test_helpers::*;
 
-use clips_nft::{ClipsNftContract, ClipsNftContractClient, Error, Royalty, RoyaltyRecipient};
+use clips_nft::{Attribute, ClipsNftContract, ClipsNftContractClient, Error, Royalty, RoyaltyRecipient};
 
 #[test]
 fn test_mint_with_image_and_animation_url() {
@@ -249,4 +249,31 @@ fn test_ipfs_urls_are_valid() {
     );
 
     assert_eq!(token_id, 1);
+}
+
+#[test]
+fn test_update_attributes_persists_in_metadata_json() {
+    let ctx = setup_test();
+    let owner = Address::generate(ctx.env);
+
+    let token_id = mint_clip(&ctx, &owner, 11, false);
+
+    let mut attributes = Vec::new(ctx.env);
+    attributes.push_back(Attribute {
+        trait_type: String::from_str(ctx.env, "virality_score"),
+        value: String::from_str(ctx.env, "98"),
+    });
+    attributes.push_back(Attribute {
+        trait_type: String::from_str(ctx.env, "duration"),
+        value: String::from_str(ctx.env, "42s"),
+    });
+
+    ctx.client
+        .update_attributes(&ctx.admin, &token_id, &attributes);
+
+    let json = ctx.client.get_metadata_json(&token_id);
+    assert!(string_contains(&json, "virality_score"));
+    assert!(string_contains(&json, "98"));
+    assert!(string_contains(&json, "duration"));
+    assert!(string_contains(&json, "42s"));
 }
