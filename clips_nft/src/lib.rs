@@ -211,6 +211,10 @@ pub enum DataKey {
     ApprovalForAll(Address, Address),
     /// Total platform royalty revenue collected (instance storage)
     TotalPlatformFees,
+    /// Global total royalties paid across all tokens (instance storage)
+    TotalRoyaltiesPaid,
+    /// Per-token cumulative royalties paid (persistent storage)
+    TokenRoyaltiesPaid(TokenId),
 }
 
 /// Event emitted when a new NFT is minted
@@ -312,6 +316,7 @@ impl ClipsNftContract {
         env.storage().instance().set(&DataKey::TotalGasTransfer, &0u64);
         env.storage().instance().set(&DataKey::CountTransfer, &0u64);
         env.storage().instance().set(&DataKey::TotalPlatformFees, &0i128);
+        env.storage().instance().set(&DataKey::TotalRoyaltiesPaid, &0i128);
         // Signer is not set at init — call set_signer before minting.
     }
 
@@ -938,7 +943,7 @@ impl ClipsNftContract {
         let mut cumulative_royalty: i128 = 0;
         for idx in 0..royalty.recipients.len() {
             let split = royalty.recipients.get(idx).ok_or(Error::InvalidRoyaltySplit)?;
-            
+
             cumulative_bps = cumulative_bps.saturating_add(split.basis_points);
             let total_royalty_so_far = Self::calculate_royalty(sale_price, cumulative_bps)?;
             let amount = total_royalty_so_far.saturating_sub(cumulative_royalty);
@@ -971,7 +976,44 @@ impl ClipsNftContract {
             );
         }
 
+        // Track global and per-token royalties paid
+        if cumulative_royalty > 0 {
+            let global: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::TotalRoyaltiesPaid)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::TotalRoyaltiesPaid, &global.saturating_add(cumulative_royalty));
+
+            let per_token: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::TokenRoyaltiesPaid(token_id))
+                .unwrap_or(0);
+            env.storage()
+                .persistent()
+                .set(&DataKey::TokenRoyaltiesPaid(token_id), &per_token.saturating_add(cumulative_royalty));
+        }
+
         Ok(())
+    }
+
+    /// Returns the total royalties distributed across all tokens since contract deployment.
+    pub fn total_royalties_paid(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalRoyaltiesPaid)
+            .unwrap_or(0)
+    }
+
+    /// Returns the cumulative royalties paid for a specific token.
+    pub fn token_royalties_paid(env: Env, token_id: TokenId) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TokenRoyaltiesPaid(token_id))
+            .unwrap_or(0)
     }
 
     /// Update the royalty configuration for a token. Admin only.
