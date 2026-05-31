@@ -1520,6 +1520,19 @@ impl ClipsNftContract {
         result
     }
 
+    pub fn set_name(env: Env, admin: Address, name: String) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Name, &name);
+        Ok(())
+    }
+
+    pub fn set_symbol(env: Env, admin: Address, symbol: String) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Symbol, &symbol);
+        Ok(())
+    }
+
+    pub fn version(_env: Env) -> u32 { VERSION }
     /// Returns the stored [`Royalty`] struct for a token.
     ///
     /// # Errors
@@ -4443,6 +4456,8 @@ mod tests {
         let contract_id = env.register(ClipsNftContract, ());
         let client = ClipsNftContractClient::new(&env, &contract_id);
         client.init(&admin);
+        client.set_platform_fee(&admin, &200u32);
+        assert_eq!(client.get_platform_fee(), 200u32);
         let kp = register_signer(&env, &client, &admin);
 
         let token_id = do_mint_soulbound(&client, &env, &user1, 100, &kp);
@@ -4475,6 +4490,8 @@ mod tests {
         let contract_id = env.register(ClipsNftContract, ());
         let client = ClipsNftContractClient::new(&env, &contract_id);
         client.init(&admin);
+        client.set_default_royalty(&admin, &300u32);
+        assert_eq!(client.get_default_royalty_bps(), 300u32);
         let kp = register_signer(&env, &client, &admin);
 
         let token_id = do_mint(&client, &env, &user1, 102, &kp);
