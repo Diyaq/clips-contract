@@ -63,6 +63,7 @@ fn test_mint_with_only_animation_url() {
         &animation_url,
         &royalty,
         &false,
+        &None,
         &sig,
     );
 
@@ -86,7 +87,7 @@ fn test_mint_without_media_fields() {
 
     let token_id = ctx
         .client
-        .mint(&owner, &clip_id, &uri, &None, &None, &royalty, &false, &sig);
+        .mint(&owner, &clip_id, &uri, &None, &None, &royalty, &false, &None, &sig);
 
     assert_eq!(token_id, 1);
 
@@ -115,6 +116,7 @@ fn test_mint_with_invalid_image_url_fails() {
         &None,
         &royalty,
         &false,
+        &None,
         &sig,
     );
     
@@ -140,6 +142,7 @@ fn test_mint_with_invalid_animation_url_fails() {
         &invalid_animation,
         &royalty,
         &false,
+        &None,
         &sig,
     );
     
@@ -194,7 +197,7 @@ fn test_refresh_metadata_clears_image_with_empty_string() {
     let royalty = default_royalty(ctx.env, owner.clone());
 
     let token_id = ctx.client.mint(
-        &owner, &clip_id, &uri, &image, &None, &royalty, &false, &sig,
+        &owner, &clip_id, &uri, &image, &None, &royalty, &false, &None, &sig,
     );
 
     // Clear the image field

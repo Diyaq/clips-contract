@@ -89,6 +89,7 @@ fn test_integration_wallet_simulation_mint_and_royalty() {
         &None, // animation_url
         &royalty,
         &false,
+        &None,
         &signature,
     );
 
@@ -382,7 +383,7 @@ fn test_pause_timelock_mint_still_works_before_24h() {
         recipients,
         asset_address: None,
     };
-    let result = client.try_mint(&user, &clip_id, &uri, &None, &None, &royalty, &false, &sig);
+    let result = client.try_mint(&user, &clip_id, &uri, &None, &None, &royalty, &false, &None, &sig);
     assert!(
         result.is_ok(),
         "mint should succeed before 24h timelock elapses"
@@ -421,7 +422,7 @@ fn test_pause_timelock_blocks_mint_after_24h() {
         recipients,
         asset_address: None,
     };
-    let result = client.try_mint(&user, &clip_id, &uri, &None, &None, &royalty, &false, &sig);
+    let result = client.try_mint(&user, &clip_id, &uri, &None, &None, &royalty, &false, &None, &sig);
     assert!(
         result.is_err(),
         "mint should fail after 24h timelock elapses"
@@ -466,7 +467,7 @@ fn test_pay_royalty_sep41_transfers_to_recipient() {
         asset_address: Some(asset.clone()),
     };
     let token_id = client.mint(
-        &creator, &clip_id, &uri, &None, &None, &royalty, &false, &sig,
+        &creator, &clip_id, &uri, &None, &None, &royalty, &false, &None, &sig,
     );
 
     let sale_price = 1_000_000i128;
@@ -513,7 +514,7 @@ fn test_claim_royalties_unauthorized_caller_fails() {
         recipients,
         asset_address: None,
     };
-    let result = client.try_mint(&user, &clip_id, &uri, &None, &None, &royalty, &false, &sig);
+    let result = client.try_mint(&user, &clip_id, &uri, &None, &None, &royalty, &false, &None, &sig);
     assert!(result.is_ok(), "mint should succeed after unpause");
 }
 

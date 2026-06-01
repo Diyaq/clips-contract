@@ -302,7 +302,7 @@ fn test_on_chain_state_after_mint() {
     let sig2 = sign_mint(&env, &backend.keypair, &creator.get_address(), clip_id, &metadata_uri);
     assert!(client.try_mint(
         &creator.get_address(), &clip_id, &metadata_uri, &None, &None,
-        &royalty_data, &false, &sig2
+        &royalty_data, &false, &None, &sig2
     ).is_err());
 }
 
@@ -418,7 +418,7 @@ fn test_wallet_blacklist_blocks_mint_and_transfer() {
     // Mint by bad_actor is rejected
     let sig = sign_mint(&env, &backend.keypair, &bad_actor, clip_id, &metadata_uri);
     assert!(client.try_mint(
-        &bad_actor, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &sig
+        &bad_actor, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &None, &sig
     ).is_err());
 
     // Mint by good_user succeeds
@@ -428,7 +428,7 @@ fn test_wallet_blacklist_blocks_mint_and_transfer() {
     r2.push_back(RoyaltyRecipient { recipient: good_user.clone(), basis_points: 500 });
     let royalty2 = Royalty { recipients: r2, asset_address: None };
     let sig2 = sign_mint(&env, &backend.keypair, &good_user, clip_id2, &uri2);
-    let token_id = client.mint(&good_user, &clip_id2, &uri2, &None, &None, &royalty2, &false, &sig2);
+    let token_id = client.mint(&good_user, &clip_id2, &uri2, &None, &None, &royalty2, &false, &None, &sig2);
 
     // Transfer to blacklisted wallet is rejected
     assert!(client.try_transfer(&good_user, &bad_actor, &token_id).is_err());
@@ -467,7 +467,7 @@ fn test_on_chain_approval_and_transfer_from() {
     recipients.push_back(RoyaltyRecipient { recipient: owner.clone(), basis_points: 500 });
     let royalty = Royalty { recipients, asset_address: None };
     let sig = sign_mint(&env, &backend.keypair, &owner, clip_id, &metadata_uri);
-    let token_id = client.mint(&owner, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &sig);
+    let token_id = client.mint(&owner, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &None, &sig);
 
     // No approval yet
     assert_eq!(client.get_approved(&token_id), None);

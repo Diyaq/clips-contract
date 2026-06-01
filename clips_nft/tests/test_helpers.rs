@@ -108,6 +108,7 @@ pub fn mint_clip(ctx: &TestContext, owner: &Address, clip_id: u32, is_soulbound:
         &None,
         &royalty,
         &is_soulbound,
+        &None,
         &sig,
     )
 }

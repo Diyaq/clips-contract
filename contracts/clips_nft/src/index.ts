@@ -320,7 +320,7 @@ export interface Client {
    * * `is_soulbound` - Whether the token is soulbound (non-transferable)
    * * `signature`    - 64-byte Ed25519 signature from the backend signer
    */
-  mint: ({to, clip_id, metadata_uri, royalty, is_soulbound, signature}: {to: string, clip_id: u32, metadata_uri: string, royalty: Royalty, is_soulbound: boolean, signature: Buffer}, options?: MethodOptions) => Promise<AssembledTransaction<Result<TokenId>>>
+  mint: ({to, clip_id, metadata_uri, royalty, is_soulbound, fee_payer, signature}: {to: string, clip_id: u32, metadata_uri: string, royalty: Royalty, is_soulbound: boolean, fee_payer?: string, signature: Buffer}, options?: MethodOptions) => Promise<AssembledTransaction<Result<TokenId>>>
 
   /**
    * Construct and simulate a pause transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.

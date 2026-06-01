@@ -86,7 +86,7 @@ fn test_blacklist_clip() {
     let signature = sign_mint(&env, &signer_keypair, &user, clip_id, &metadata_uri);
 
     // Mint before blacklist should work
-    let token_id = client.mint(&user, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &signature);
+    let token_id = client.mint(&user, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &None, &signature);
     assert_eq!(token_id, 1);
 
     // Blacklist the clip
@@ -105,7 +105,7 @@ fn test_blacklist_clip() {
         asset_address: None,
     };
 
-    let result = client.try_mint(&user, &(clip_id + 1), &metadata_uri2, &None, &None, &royalty2, &false, &signature2);
+    let result = client.try_mint(&user, &(clip_id + 1), &metadata_uri2, &None, &None, &royalty2, &false, &None, &signature2);
     assert!(result.is_err());
 }
 
@@ -140,6 +140,6 @@ fn test_get_clip_id() {
     };
     let signature = sign_mint(&env, &signer_keypair, &user, clip_id, &metadata_uri);
 
-    let token_id = client.mint(&user, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &signature);
+    let token_id = client.mint(&user, &clip_id, &metadata_uri, &None, &None, &royalty, &false, &None, &signature);
     assert_eq!(client.get_clip_id(&token_id), clip_id);
 }

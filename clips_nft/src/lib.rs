@@ -55,6 +55,9 @@ pub enum Error {
     MintingPaused = 25,
     CircuitBreakerTripped = 26,
     MetadataLocked = 27,
+    MaxSupplyReached = 28,
+    InvalidMaxSupply = 29,
+    InvalidRecoverAmount = 30,
 }
 
 // =============================================================================
@@ -150,6 +153,7 @@ pub enum DataKey {
     MintCooldownSeconds,
     ReentrancyLock,
     TotalSupply,
+    MaxSupply,
     ContractVersion,
     CircuitBreakerEnabled,
     CircuitBreakerThreshold,
@@ -404,6 +408,7 @@ impl ClipsNftContract {
         env.storage().instance().set(&DataKey::CircuitBreakerWindowSeconds, &DEFAULT_CIRCUIT_BREAKER_WINDOW_SECONDS);
         env.storage().instance().set(&DataKey::CircuitBreakerWindowStart, &0u64);
         env.storage().instance().set(&DataKey::CircuitBreakerWindowCount, &0u64);
+        env.storage().instance().set(&DataKey::MaxSupply, &Option::<u32>::None);
         env.storage().instance().set(&DataKey::BackendAddress, &admin);
     }
 
@@ -545,6 +550,31 @@ impl ClipsNftContract {
         env.storage().instance().get(&DataKey::PendingOwner)
     }
 
+    /// Set or clear the global maximum supply cap for mintable NFTs.
+    ///
+    /// Passing `None` removes the cap.
+    pub fn set_max_supply(env: Env, admin: Address, max_supply: Option<u32>) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if let Some(max_supply) = max_supply {
+            let supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+            if max_supply < supply {
+                return Err(Error::InvalidMaxSupply);
+            }
+        }
+        env.storage().instance().set(&DataKey::MaxSupply, &max_supply);
+        Ok(())
+    }
+
+    pub fn max_supply(env: Env) -> Option<u32> {
+        env.storage().instance().get(&DataKey::MaxSupply).unwrap_or(None)
+    }
+
+    pub fn remaining_supply(env: Env) -> Option<u32> {
+        let max_supply: Option<u32> = env.storage().instance().get(&DataKey::MaxSupply).unwrap_or(None);
+        let supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+        max_supply.map(|cap| cap.saturating_sub(supply))
+    }
+
     // -------------------------------------------------------------------------
     // Task 1: Safe math — mint with overflow-safe royalty validation
     // -------------------------------------------------------------------------
@@ -558,9 +588,13 @@ impl ClipsNftContract {
         animation_url: Option<String>,
         royalty: Royalty,
         is_soulbound: bool,
+        fee_payer: Option<Address>,
         signature: BytesN<64>,
     ) -> Result<TokenId, Error> {
         to.require_auth();
+        if let Some(fee_payer) = fee_payer.clone() {
+            fee_payer.require_auth();
+        }
         Self::require_not_paused(&env)?;
         if env
             .storage()
@@ -575,6 +609,12 @@ impl ClipsNftContract {
         }
         Self::enforce_mint_cooldown(&env, &to)?;
         Self::check_circuit_breaker(&env, 1)?;
+        let current_supply: u32 = env.storage().instance().get(&DataKey::TotalSupply).unwrap_or(0);
+        if let Some(max_supply) = env.storage().instance().get::<DataKey, Option<u32>>(&DataKey::MaxSupply).unwrap_or(None) {
+            if current_supply >= max_supply {
+                return Err(Error::MaxSupplyReached);
+            }
+        }
         Self::validate_url(&env, &image)?;
         Self::validate_url(&env, &animation_url)?;
         Self::verify_clip_signature(&env, &to, clip_id, &metadata_uri, &signature)?;
@@ -1327,6 +1367,15 @@ impl ClipsNftContract {
         env.storage().instance().set(&DataKey::LastWithdrawalTime, &env.ledger().timestamp());
         soroban_sdk::token::TokenClient::new(&env, &asset).transfer(&env.current_contract_address(), &admin, &amount);
         env.events().publish((symbol_short!("wdraw_exe"), admin.clone()), WithdrawExecutedEvent { amount, recipient: admin });
+        Ok(())
+    }
+
+    pub fn recover_token(env: Env, admin: Address, asset: Address, amount: i128) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if amount <= 0 {
+            return Err(Error::InvalidRecoverAmount);
+        }
+        soroban_sdk::token::TokenClient::new(&env, &asset).transfer(&env.current_contract_address(), &admin, &amount);
         Ok(())
     }
 
@@ -2532,6 +2581,15 @@ impl ClipsNftContract {
         env.storage().instance().set(&DataKey::LastWithdrawalTime, &env.ledger().timestamp());
         soroban_sdk::token::TokenClient::new(&env, &asset).transfer(&env.current_contract_address(), &admin, &amount);
         env.events().publish((symbol_short!("wdraw_exe"), admin.clone()), WithdrawExecutedEvent { amount, recipient: admin });
+        Ok(())
+    }
+
+    pub fn recover_token(env: Env, admin: Address, asset: Address, amount: i128) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        if amount <= 0 {
+            return Err(Error::InvalidRecoverAmount);
+        }
+        soroban_sdk::token::TokenClient::new(&env, &asset).transfer(&env.current_contract_address(), &admin, &amount);
         Ok(())
     }
 

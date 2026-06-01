@@ -641,7 +641,7 @@ fn test_upgrade_preserves_royalty_balances() {
         asset_address: Some(asset.clone()),
     };
     let token_id = client.mint(
-        &creator, &clip_id, &uri, &None, &None, &royalty, &false, &sig,
+        &creator, &clip_id, &uri, &None, &None, &royalty, &false, &None, &sig,
     );
 
     // Pay royalty to accumulate a balance.
