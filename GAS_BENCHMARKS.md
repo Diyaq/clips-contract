@@ -47,6 +47,8 @@ each mainnet deployment.
 | `refresh_metadata` | — | ~10 000 | ~11 000 | 1 persistent write + cooldown check |
 | `pause` / `unpause` | — | ~5 000 | ~5 500 | Instance storage write |
 | `blacklist_clip` | — | ~7 000 | ~7 500 | 1 persistent write |
+| `blacklist_wallet` | — | ~7 000 | ~7 500 | 1 persistent write |
+| `unblacklist_wallet` | — | ~6 500 | ~7 000 | 1 persistent remove |
 | `set_platform_fee` | — | ~5 000 | ~5 500 | Instance storage write |
 | `request_withdraw_asset` | — | ~6 000 | ~6 500 | Instance storage write with timelock |
 | `withdraw_asset` | — | ~20 000 | ~22 000 | Token transfer + storage remove |
@@ -67,6 +69,25 @@ fees bid by other transactions during peak periods.
 
 ---
 
+## Storage key size reference
+
+Knowing key sizes helps predict ledger-entry fees. Soroban charges per byte of the
+XDR-encoded key; smaller keys → lower per-entry cost.
+
+| Key | Before | After | Saving |
+| --- | --- | --- | --- |
+| `ApprovalForAll(Address, Address)` | ~72 bytes (2 × raw Address XDR) | 32 bytes (`BytesN<32>` hash) | ~40 bytes (~55 %) |
+| `Token(u32)` | ~8 bytes | 8 bytes | — (already compact) |
+| `ClipIdMinted(u32)` | ~8 bytes | 8 bytes | — |
+| `BlacklistedClip(u32)` | ~8 bytes | 8 bytes | — |
+| `BlacklistedWallet(Address)` | ~36 bytes | 36 bytes | — (new; single address) |
+| `Balance(Address)` | ~36 bytes | 36 bytes | — |
+
+> The `ApprovalForAll` key optimization was applied in 2025-Q2. It is not
+> backwards-compatible with data written under the old two-address key format.
+
+---
+
 ## Optimization history
 
 | Date | Change | Impact |
@@ -75,6 +96,8 @@ fees bid by other transactions during peak periods.
 | 2024-Q1 | Added `TokenIndex` global enumeration | `token_by_index`: O(n) → O(1) |
 | 2024-Q2 | Reduced `burn` from 4 persistent removes to 2 | ~8 000 stroop saving |
 | 2025-Q2 | `batch_mint` gas is now tracked per-token | Better profiling |
+| 2025-Q2 | `ApprovalForAll` key compacted to SHA-256 hash | ~40-byte key reduction per approval entry |
+| 2025-Q2 | Wallet blacklist feature added | `blacklist_wallet` / `unblacklist_wallet` / `is_wallet_blacklisted` |
 
 ---
 
