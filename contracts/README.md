@@ -85,6 +85,28 @@ message    = SHA-256( clip_id_le_4_bytes || owner_hash || uri_hash )
 
 - **Type**: view (alias)
 
+#### `refresh_metadata(caller: Address, token_id: TokenId, new_uri: Option<String>, image: Option<String>, animation_url: Option<String>) -> Result<(), Error>`
+
+- **Requires**: admin or registered backend address
+- **Purpose**: update on-chain media metadata for a token (30-day cooldown per token)
+- **Optional fields**: pass `None` to leave unchanged; pass `Some("")` to clear `image` or `animation_url`
+
+#### `get_metadata_json(token_id: TokenId) -> Result<String, Error>`
+
+- **Type**: view
+- **Returns**: OpenSea-compatible JSON including `metadata_uri`, and when set, `image` and `animation_url`
+
+### Recommended media formats
+
+| Field | Purpose | Recommended formats | URL schemes |
+|-------|---------|---------------------|-------------|
+| `image` | Static thumbnail shown in wallets and marketplaces | PNG, JPEG, WebP, SVG | `https://`, `ipfs://` |
+| `animation_url` | Short animated preview or video snippet | GIF, MP4, WebM | `https://`, `ipfs://` |
+
+Store media on IPFS or Arweave and reference with `ipfs://` URIs for permanence. Keep animated previews short (typically under 15 seconds) to limit download size in wallet UIs.
+
+Both fields are validated on-chain at mint and on refresh. Empty strings clear an existing value during `refresh_metadata` only.
+
 #### `is_soulbound(token_id: TokenId) -> bool`
 
 - **Type**: view
