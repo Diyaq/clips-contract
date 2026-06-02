@@ -3041,63 +3041,34 @@ impl ClipsNftContract {
     }
 
     // -------------------------------------------------------------------------
-    // Royalty extension (EIP-2981 style)
+    // Core NFT operations
     // -------------------------------------------------------------------------
 
-    /// Returns the royalty receiver, total amount, and payment asset for a sale.
+    /// Mint a new NFT for a video clip.
     ///
-    /// Formula: `royalty_amount = sale_price × total_basis_points / 10_000`
+    /// Requires a valid Ed25519 `signature` from the registered backend signer
+    /// over the canonical mint payload, proving the clip exists and belongs to
+    /// `to`. The payload is:
     ///
-    /// Uses overflow-safe arithmetic; returns [`Error::RoyaltyOverflow`] when
-    /// `sale_price > i128::MAX / 10_000`.
+    /// ```text
+    /// payload = SHA-256(
+    ///     clip_id_le_4_bytes
+    ///     || SHA-256(owner_address_xdr)   // 32 bytes
+    ///     || SHA-256(metadata_uri_bytes)  // 32 bytes
+    /// )
+    /// ```
     ///
-    /// # Arguments
-    /// * `token_id`   — Token being sold.
-    /// * `sale_price` — Sale price in the asset's smallest unit (must be > 0).
-    ///
-    /// # Errors
-    /// * [`Error::InvalidTokenId`]    — token does not exist.
-    /// * [`Error::InvalidSalePrice`]  — `sale_price` ≤ 0.
-    /// * [`Error::RoyaltyOverflow`]   — arithmetic would overflow.
-    /// * [`Error::InvalidRoyaltySplit`] — royalty recipients list is empty.
-    pub fn royalty_info(
-        env: Env,
-        token_id: TokenId,
-        sale_price: i128,
-    ) -> Result<RoyaltyInfo, Error> {
-        let royalty = Self::load_token(&env, token_id)?.royalty;
-        let total_royalty_amount = royalty.calculate_royalty(sale_price)?;
-        let first = royalty.recipients.get(0).ok_or(Error::InvalidRoyaltySplit)?;
-
-        Ok(RoyaltyInfo {
-            receiver: first.recipient,
-            royalty_amount: total_royalty_amount,
-            asset_address: royalty.asset_address,
-        })
-    }
-
-    /// Pay royalties for a token sale using the SEP-0041 asset in the royalty config.
-    ///
-    /// Iterates over all recipients and transfers each share via the token client.
-    /// Also accrues the total royalty amount to `RoyaltyBalance(token_id)` so
-    /// recipients can track lifetime earnings and claim via [`claim_royalties`].
-    /// For XLM royalties (`asset_address = None`) the marketplace must handle
-    /// the transfer directly — this function returns [`Error::InvalidRecipient`].
-    ///
-    /// Emits: `"royalty"` [`RoyaltyPaidEvent`] per recipient paid.
+    /// Storage writes (persistent): TokenData, Metadata, Royalty, ClipIdMinted = **4**
+    /// Instance writes: NextTokenId = **1**
     ///
     /// # Arguments
-    /// * `payer`      — Address making the payment (must authorize).
-    /// * `token_id`   — Token being sold.
-    /// * `sale_price` — Sale price in the asset's smallest unit (must be > 0).
-    ///
-    /// # Errors
-    /// * [`Error::InvalidSalePrice`]  — `sale_price` ≤ 0.
-    /// * [`Error::InvalidTokenId`]    — token does not exist.
-    /// * [`Error::InvalidRecipient`]  — no SEP-0041 asset configured (XLM royalty).
-    /// * [`Error::InvalidRoyaltySplit`] — recipients list is empty.
-    /// * [`Error::RoyaltyOverflow`]   — arithmetic would overflow.
-    pub fn pay_royalty(
+    /// * `to`           - Address that will own the NFT (must match the signed payload)
+    /// * `clip_id`      - Unique off-chain clip identifier (must match the signed payload)
+    /// * `metadata_uri` - IPFS or Arweave URI (must match the signed payload)
+    /// * `royalty`      - Royalty configuration
+    /// * `is_soulbound` - Whether the token is soulbound (non-transferable)
+    /// * `signature`    - 64-byte Ed25519 signature from the backend signer
+    pub fn mint(
         env: Env,
         payer: Address,
         token_id: TokenId,
