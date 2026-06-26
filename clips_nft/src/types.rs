@@ -44,6 +44,8 @@ pub enum DataKey {
     Metadata(u32),
     Royalty(u32),
     ClipIdMinted(u32),
+    PlatformFee,
+    DefaultRoyaltyBps,
 }
 
 #[contracttype]

@@ -6,8 +6,10 @@
 
 #![no_std]
 
+mod platform_fee;
 mod types;
 
+pub use platform_fee::{get_platform_fee, set_platform_fee, MAX_PLATFORM_FEE_BPS};
 pub use types::{DataKey, Error, MintEvent, Royalty, RoyaltyInfo, TokenData, TokenId};
 
 use soroban_sdk::{
@@ -31,6 +33,21 @@ impl ClipCashNFT {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::NextTokenId, &0u32);
         env.storage().instance().set(&DataKey::Paused, &false);
+    }
+
+    // ─── Platform Fee ────────────────────────────────────────────────────────
+
+    /// Set the platform fee in basis points (max 1 000 = 10 %).
+    /// Admin only.
+    pub fn set_platform_fee(env: Env, admin: Address, fee_bps: u32) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        admin.require_auth();
+        platform_fee::set_platform_fee(&env, fee_bps)
+    }
+
+    /// Return the current platform fee in basis points.
+    pub fn get_platform_fee(env: Env) -> u32 {
+        platform_fee::get_platform_fee(&env)
     }
 
     // ─── Signer ──────────────────────────────────────────────────────────────
