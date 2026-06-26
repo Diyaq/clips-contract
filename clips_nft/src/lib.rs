@@ -6,9 +6,13 @@
 
 #![no_std]
 
+mod default_royalty;
 mod platform_fee;
 mod types;
 
+pub use default_royalty::{
+    get_default_royalty_bps, set_default_royalty_bps, DEFAULT_ROYALTY_BPS, MAX_ROYALTY_BPS,
+};
 pub use platform_fee::{get_platform_fee, set_platform_fee, MAX_PLATFORM_FEE_BPS};
 pub use types::{DataKey, Error, MintEvent, Royalty, RoyaltyInfo, TokenData, TokenId};
 
@@ -33,6 +37,21 @@ impl ClipCashNFT {
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::NextTokenId, &0u32);
         env.storage().instance().set(&DataKey::Paused, &false);
+    }
+
+    // ─── Default Royalty ─────────────────────────────────────────────────────
+
+    /// Set the contract-wide default royalty in basis points (max 10 000 = 100 %).
+    /// Admin only.
+    pub fn set_default_royalty_bps(env: Env, admin: Address, bps: u32) -> Result<(), Error> {
+        Self::require_admin(&env, &admin)?;
+        admin.require_auth();
+        default_royalty::set_default_royalty_bps(&env, bps)
+    }
+
+    /// Return the default royalty in basis points (defaults to 500 = 5 %).
+    pub fn get_default_royalty_bps(env: Env) -> u32 {
+        default_royalty::get_default_royalty_bps(&env)
     }
 
     // ─── Platform Fee ────────────────────────────────────────────────────────
