@@ -7,7 +7,10 @@
 #![no_std]
 
 mod config;
+mod config_guard;
+mod config_validator;
 mod default_royalty;
+mod payment_currency;
 mod platform_fee;
 mod types;
 
@@ -16,6 +19,12 @@ pub use default_royalty::{
     get_default_royalty_bps, set_default_royalty_bps, DEFAULT_ROYALTY_BPS, MAX_ROYALTY_BPS,
 };
 pub use platform_fee::{get_platform_fee, set_platform_fee, MAX_PLATFORM_FEE_BPS};
+pub use config_guard::require_config_admin;
+pub use config_validator::{
+    validate_collection_limit, validate_config, validate_fee, validate_royalty_bps, validate_uri,
+    MAX_COLLECTION_LIMIT,
+};
+pub use payment_currency::{add_currency, get_currencies, is_supported, remove_currency};
 pub use types::{DataKey, Error, MintEvent, Royalty, RoyaltyInfo, TokenData, TokenId};
 
 use soroban_sdk::{
@@ -44,9 +53,10 @@ impl ClipCashNFT {
     // ─── Config ───────────────────────────────────────────────────────────────
 
     /// Persist a full [`Config`] snapshot. Admin only.
+    /// Uses the configuration guard and validator.
     pub fn set_config(env: Env, admin: Address, cfg: Config) -> Result<(), Error> {
-        Self::require_admin(&env, &admin)?;
-        admin.require_auth();
+        config_guard::require_config_admin(&env, &admin)?;
+        config_validator::validate_config(&env, &cfg)?;
         config::set_config(&env, cfg)
     }
 
@@ -58,10 +68,9 @@ impl ClipCashNFT {
     // ─── Default Royalty ─────────────────────────────────────────────────────
 
     /// Set the contract-wide default royalty in basis points (max 10 000 = 100 %).
-    /// Admin only.
+    /// Admin only. Uses configuration guard.
     pub fn set_default_royalty_bps(env: Env, admin: Address, bps: u32) -> Result<(), Error> {
-        Self::require_admin(&env, &admin)?;
-        admin.require_auth();
+        config_guard::require_config_admin(&env, &admin)?;
         default_royalty::set_default_royalty_bps(&env, bps)
     }
 
@@ -75,14 +84,37 @@ impl ClipCashNFT {
     /// Set the platform fee in basis points (max 1 000 = 10 %).
     /// Admin only.
     pub fn set_platform_fee(env: Env, admin: Address, fee_bps: u32) -> Result<(), Error> {
-        Self::require_admin(&env, &admin)?;
-        admin.require_auth();
+        config_guard::require_config_admin(&env, &admin)?;
         platform_fee::set_platform_fee(&env, fee_bps)
     }
 
     /// Return the current platform fee in basis points.
     pub fn get_platform_fee(env: Env) -> u32 {
         platform_fee::get_platform_fee(&env)
+    }
+
+    // ─── Payment Currencies ────────────────────────────────────────────────
+
+    /// Add a supported payment currency. Admin only.
+    pub fn add_currency(env: Env, admin: Address, currency: Address) -> Result<(), Error> {
+        config_guard::require_config_admin(&env, &admin)?;
+        payment_currency::add_currency(&env, currency)
+    }
+
+    /// Remove a supported payment currency. Admin only.
+    pub fn remove_currency(env: Env, admin: Address, currency: Address) -> Result<(), Error> {
+        config_guard::require_config_admin(&env, &admin)?;
+        payment_currency::remove_currency(&env, &currency)
+    }
+
+    /// Get the list of supported payment currencies.
+    pub fn get_currencies(env: Env) -> soroban_sdk::Vec<Address> {
+        payment_currency::get_currencies(&env)
+    }
+
+    /// Check if a currency is supported for payments.
+    pub fn is_currency_supported(env: Env, currency: Address) -> bool {
+        payment_currency::is_supported(&env, &currency)
     }
 
     // ─── Signer ──────────────────────────────────────────────────────────────
