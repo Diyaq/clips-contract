@@ -6,16 +6,24 @@
 
 #![no_std]
 
+mod blacklist;
 mod config;
 mod default_royalty;
+mod operator_approval;
+mod pause_state;
 mod platform_fee;
+mod token_approval;
 mod types;
 
+pub use blacklist::{add_wallet, is_blacklisted, remove_wallet};
 pub use config::{get_config, set_config, Config, CONTRACT_VERSION};
 pub use default_royalty::{
     get_default_royalty_bps, set_default_royalty_bps, DEFAULT_ROYALTY_BPS, MAX_ROYALTY_BPS,
 };
+pub use operator_approval::{is_operator, remove_operator, save_operator};
+pub use pause_state::{get_pause_state, save_pause_state};
 pub use platform_fee::{get_platform_fee, set_platform_fee, MAX_PLATFORM_FEE_BPS};
+pub use token_approval::{get_approval, remove_approval, save_approval};
 pub use types::{DataKey, Error, MintEvent, Royalty, RoyaltyInfo, TokenData, TokenId};
 
 use soroban_sdk::{

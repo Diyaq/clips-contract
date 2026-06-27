@@ -47,6 +47,9 @@ pub enum DataKey {
     PlatformFee,
     DefaultRoyaltyBps,
     Config,
+    Approval(u32),
+    Blacklisted(Address),
+    OperatorApproval(Address, Address),
 }
 
 #[contracttype]
