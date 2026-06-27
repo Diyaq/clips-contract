@@ -12,9 +12,15 @@
  *   - Soft-delete: sets deletedAt timestamp rather than removing the record.
  *   - Returns a JSON success message on success.
  *
+ * Authorization is delegated to the shared `assertAdmin` helper from
+ * admin-auth.js so that ownership enforcement stays consistent across all
+ * privileged operations.
+ *
  * This module exports a plain handler function so it can be mounted on any
  * Express-compatible router.
  */
+
+import { assertAdmin, AdminAuthError } from "./admin-auth.js";
 
 /** @type {Map<string, Wallet>} */
 const wallets = new Map();
@@ -67,8 +73,15 @@ function disconnectWallet(req, res) {
     return res.status(404).json({ error: "Wallet not found" });
   }
 
-  if (wallet.userId !== requestingUserId) {
-    return res.status(403).json({ error: "Not authorized to disconnect this wallet" });
+  // Delegate ownership check to the shared authorization helper so that the
+  // "caller must own the resource" rule is enforced consistently everywhere.
+  try {
+    assertAdmin(requestingUserId, wallet.userId);
+  } catch (err) {
+    if (err instanceof AdminAuthError) {
+      return res.status(403).json({ error: "Not authorized to disconnect this wallet" });
+    }
+    throw err;
   }
 
   if (wallet.hasActiveNFTs) {
